@@ -1,0 +1,104 @@
+/ {
+	aliases {
+		/* W25Q64 使用此 SPI；52832 overlay 会覆盖为 &spi1 */
+		w25q64-spi = &spi0;
+	};
+	chosen {
+		zephyr,console = &uart0;
+		zephyr,shell-uart = &uart0;
+	};
+};
+
+&uart0 {
+	status = "okay";
+	current-speed = <115200>;
+	pinctrl-0 = <&uart0_default_custom>;
+	pinctrl-1 = <&uart0_sleep_custom>;
+	pinctrl-names = "default", "sleep";
+};
+
+&pinctrl {
+	uart0_default_custom: uart0_default_custom {
+		group1 {
+			psels = <NRF_PSEL(UART_TX, 0, 18)>,
+			        <NRF_PSEL(UART_RX, 0, 14)>;
+		};
+	};
+
+	uart0_sleep_custom: uart0_sleep_custom {
+		group1 {
+			psels = <NRF_PSEL(UART_TX, 0, 18)>,
+			        <NRF_PSEL(UART_RX, 0, 14)>;
+			low-power-enable;
+		};
+	};
+
+	i2c0_default_custom: i2c0_default_custom {
+		group1 {
+			psels = <NRF_PSEL(TWIM_SDA, 0, 7)>,
+			        <NRF_PSEL(TWIM_SCL, 0, 6)>;
+			bias-pull-up;
+		};
+	};
+
+	i2c0_sleep_custom: i2c0_sleep_custom {
+		group1 {
+			psels = <NRF_PSEL(TWIM_SDA, 0, 7)>,
+			        <NRF_PSEL(TWIM_SCL, 0, 6)>;
+			low-power-enable;
+			bias-pull-up;
+		};
+	};
+};
+
+&uicr {
+	/delete-property/ gpio-as-nreset;
+};
+
+&i2c0 {
+	status = "okay";
+	compatible = "nordic,nrf-twim";
+	pinctrl-0 = <&i2c0_default_custom>;
+	pinctrl-1 = <&i2c0_sleep_custom>;
+	pinctrl-names = "default", "sleep";
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+	/delete-property/ zephyr,pm-device-runtime-auto;
+};
+
+/* SPI0 已移至板级 overlay：nrf52810/e104_bt5010a_tb 用 spi0，52832 用 spi1 且不启用 spi0 */
+
+&adc {
+	/delete-property/ zephyr,pm-device-runtime-auto;
+};
+
+&flash_controller {
+	status = "okay";
+};
+
+&flash0 {
+	status = "okay";
+	/delete-property/ zephyr,pm-device-runtime-auto;
+
+	/* 删除默认分区配置，防止标签冲突 */
+	/delete-node/ partitions;
+
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/* Application (0x0 - 0x2A000: 168KB) */
+		slot0_partition: partition@0 {
+			label = "image-0";
+			reg = <0x00000000 0x0002A000>;
+		};
+
+		/* NVS Storage (0x2A000 - 0x2D000: 12KB) */
+		nvs_partition: partition@2a000 {
+			label = "nvs_storage";
+			reg = <0x0002A000 0x00003000>;
+		};
+
+		/* Reserved for Config (0x2F000 - 0x30000: 4KB) - Used by main.c raw flash access */
+	};
+};
