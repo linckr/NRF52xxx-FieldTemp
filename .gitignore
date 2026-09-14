@@ -1,0 +1,24 @@
+# ---- 构建产物 ----
+build/
+build-*/
+*.log
+
+# ---- Python 缓存 ----
+__pycache__/
+*.py[cod]
+
+# ---- 本机生成的分析报告 ----
+ram_report.txt
+rom_report.txt
+
+# ---- 密钥材料：绝不入库 ----
+# OTA 授权密钥头（由 src/ble/ota_auth_key.h.example 复制而来，见该文件说明）
+src/ble/ota_auth_key.h
+# MCUboot 镜像签名私钥
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+keys/

@@ -1,5 +1,17 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 
+/*
+ * WARNING: this file is NOT used by any build.
+ *
+ * The board target is `nrf52dk/nrf52810`; Zephyr hwmv2 only looks for
+ * `<board>_<soc>.overlay` (i.e. `nrf52dk_nrf52810.overlay`).  There is no
+ * `nrf52810dk` board, so this file is never applied — which is why SPI0 kept
+ * running on the nRF52 DK default pins.  All board pin configuration for the
+ * current target now lives in `app.overlay`; do not "fix" this by renaming it,
+ * because a matching `boards/*.overlay` silently replaces `app.overlay`
+ * (see cmake/modules/configuration_files.cmake).
+ */
+
 / {
 	
 	chosen {

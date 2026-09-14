@@ -39,8 +39,17 @@ extern "C" {
 #define W25Q64_BLOCK_SIZE_64K 65536   /* 64KB块大小 */
 #define W25Q64_TOTAL_SIZE     0x800000 /* 8MB */
 
-/* W25Q64 存储区域定义（使用前1MB存储历史数据）*/
-#define W25Q64_STORAGE_BASE   0x000000
+/*
+ * W25Q64 layout with MCUboot:
+ *   0x000000 - 0x027FFF : MCUboot secondary image
+ *   0x028000 - 0x02DFFF : NVS (PM nvs_storage, 24 KiB)
+ *   0x02E000 -           : history records
+ */
+#define W25Q64_MCUBOOT_SECONDARY_BASE 0x000000
+#define W25Q64_MCUBOOT_SECONDARY_SIZE 0x028000
+#define W25Q64_NVS_BASE               0x028000
+#define W25Q64_NVS_SIZE               0x006000
+#define W25Q64_STORAGE_BASE           (W25Q64_NVS_BASE + W25Q64_NVS_SIZE)
 #define W25Q64_STORAGE_SIZE   0x100000  /* 1MB存储区域 */
 #define W25Q64_MAX_SECTORS    256       /* 1MB / 4KB = 256个扇区 */
 
