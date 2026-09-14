@@ -251,8 +251,15 @@ async def run(args):
         await c.connect()
         try:
             print("仅触发升级（设备应处于 VERIFY 状态）…")
-            await c.ctrl(CTRL_TRIGGER)
-            await asyncio.sleep(1.5)
+            # 同 --only-trigger：TRIGGER 后链路必然断开，属预期（见下方完整流程的说明）。
+            try:
+                await c.ctrl(CTRL_TRIGGER)
+                await asyncio.sleep(1.5)
+            except Exception as e:      # noqa: BLE001
+                print("  TRIGGER 已发出，链路随设备复位断开（%s: %s）"
+                      % (type(e).__name__, e))
+                print("  ✅ 设备已请求升级并重启（链路断开属预期，判为成功）。")
+                return 0
             print("  已发送 TRIGGER，设备应重启。")
             return 0
         finally:
@@ -367,8 +374,19 @@ async def run(args):
             return 0
 
         print("触发升级（设备会先保存历史写头与配置，再请求升级并重启）…")
-        await c.ctrl(CTRL_TRIGGER)
-        await asyncio.sleep(2.0)
+        # ⚠️ TRIGGER 之后设备立刻 sys_reboot()，链路必然断开。
+        # 这不代表失败 —— 与 Android 端（TRIGGER_DISCONNECT_GRACE_MS）和
+        # OTA.md §5.5 / PROTOCOL.md §7 的口径一致：**断开即成功**。
+        # 实测断开的表象有两种：BLE 写返回 status=133(GATT_ERROR)，
+        # 或 WinRT 直接抛 OSError [WinError -2147467260] 已中止操作。
+        try:
+            await c.ctrl(CTRL_TRIGGER)
+            await asyncio.sleep(2.0)
+        except Exception as e:      # noqa: BLE001
+            print("  TRIGGER 已发出，链路随设备复位断开（%s: %s）"
+                  % (type(e).__name__, e))
+            print("  ✅ 设备已请求升级并重启（链路断开属预期，判为成功）。")
+            return 0
         print("  已发送 TRIGGER，设备应重启。")
         return 0
     finally:

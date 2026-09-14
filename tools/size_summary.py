@@ -324,10 +324,16 @@ def gate(build_dir, res, args):
         return measured
 
     # C1. 容器 vs 叶子
-    # 容器 = 带 span 的分区，或**在同一介质（region+device）内**完整包含另一个分区
-    # （例如 external_flash 伞形区包含 nvs_storage）。必须限定同介质，
-    # 否则会把跨介质、地址区间偶然包含的分区（如外 Flash 的 mcuboot_secondary
-    # 在数值上包住内部 Flash 的 mcuboot_pad）误判为容器。
+    # 两类都当作"容器"排除在重叠判定之外：
+    #   (a) **带 span 的分区** —— 这是 Nordic Partition Manager 官方定义的 container；
+    #   (b) **在同一介质（region+device）内完整包含另一个分区**的分区
+    #       （例如 external_flash 与 nvs_storage 地址重叠）。
+    # ⚠️ (b) 是本工具**自己的启发式**，不代表 PM 官方语义：
+    #    pm_static.yml 里的 external_flash 条目**没有 span**，其真实 PM 语义
+    #    （是否算容器、是否该保留该显式条目）**尚未核对**。
+    #    这里保留启发式只是为了让门禁不误报，**不等于"重叠是正常的"**。
+    #    必须限定同介质，否则会把跨介质、地址区间偶然包含的分区（如外 Flash 的
+    #    mcuboot_secondary 在数值上包住内部 Flash 的 mcuboot_pad）误判为容器。
     def rng(key):
         p = parts[key]
         start = p.get("address", 0)
@@ -341,6 +347,7 @@ def gate(build_dir, res, args):
     for name, part in parts.items():
         if part.get("span"):
             containers.add(name)
+    span_containers = set(containers)
     for name in parts:
         if name in containers:
             continue
@@ -355,6 +362,7 @@ def gate(build_dir, res, args):
                 containers.add(name)
                 break
     leaves = [n for n in parts if n not in containers]
+    heuristic_containers = containers - span_containers
 
     # 只在「同 region 同 device」的叶子之间查重叠，避免跨介质误报
     def bucket(key):
@@ -374,9 +382,14 @@ def gate(build_dir, res, args):
     if overlaps:
         res.fail("C1 叶子分区不重叠", "\n".join(overlaps))
     else:
-        res.ok("C1 叶子分区不重叠",
-               "%d 个叶子分区（容器 %s 已排除，不参与重叠判定）"
-               % (len(leaves), "、".join(sorted(containers))))
+        detail = "%d 个叶子分区" % len(leaves)
+        if span_containers:
+            detail += "；span 定义的容器已排除：%s" % "、".join(sorted(span_containers))
+        if heuristic_containers:
+            detail += ("；另有 %s 按本工具启发式（同一介质内含住另一分区）视为伞形区排除，"
+                       "**该判定不代表 PM 官方语义，需单独核对**"
+                       % "、".join(sorted(heuristic_containers)))
+        res.ok("C1 叶子分区不重叠", detail)
 
     # C2. mcuboot_primary 的 span 与实际地址自洽
     prim_lo, prim_hi = rng("mcuboot_primary")

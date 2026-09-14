@@ -1,3 +1,25 @@
+工程交接文档（先读这个）
+========================
+
+本项目已完成 **MCUboot 双槽 + 自定义 BLE OTA** 改造。接手开发请按以下顺序阅读：
+
+- `CODEX_START_HERE.md <CODEX_START_HERE.md>`_ —— **第一入口**：项目是什么、当前在哪、下一步做什么
+- `HANDOFF.md <HANDOFF.md>`_ —— 当前状态 / 待办任务 / 禁止改动项 / 代码地图 / 技术债
+- `DEVELOPMENT.md <DEVELOPMENT.md>`_ —— 开发环境、构建 / 烧录 / 调试命令（可直接复制）
+- `HARDWARE.md <HARDWARE.md>`_ —— 引脚与 Flash 分区（含实际分区表与约束）
+- `OTA.md <OTA.md>`_ —— OTA 架构、签名流程、镜像格式
+- `PROTOCOL.md <PROTOCOL.md>`_ —— Firmware ↔ Android 接口协议（byte-level）
+
+**当前固件版本**：``1.0.8+0``（唯一来源是仓库根 ``VERSION`` 文件）。
+
+⚠️ 下面「硬件要求」中写的 LED 引脚（P0.31 / P0.30）与当前代码**不符**：
+那两个脚现在是 SPI 的 MOSI/SCK，LED 实际是 **P0.4（DATA）/ P0.5（LINK）**。
+以 ``src/board_pins.h`` 与 ``app.overlay`` 为准，详见 `HARDWARE.md <HARDWARE.md>`_。
+
+⚠️ 仓库内 ``docs/`` 是**上游历史设计文档**，描述的是旧方案，不要当作当前实现来读。
+
+---
+
 蓝牙温湿度采集系统
 ******************
 
