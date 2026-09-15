@@ -14,7 +14,6 @@
 
 | 服务 | 服务 UUID | 特征 | 特征 UUID | 属性 | CCC | 用途 |
 |---|---|---|---|---|---|---|
-| 时间同步 | `12340010` ⚠️**不存在的服务** | — | — | — | — | 见下方注意 |
 | 配置 | `12340020-1234-5678-1234-56789abcdef0` | 历史记录间隔 | `12340021-…` | READ / WRITE | 无 | uint16 秒（60~3600） |
 | | | 设备状态 | `12340022-…` | READ / NOTIFY | 有 | 12 B |
 | | | 历史数据 | `12340023-…` | WRITE / NOTIFY | 有 | 写 4 B 起始时间戳；通知 60 B 数据包 |
@@ -29,27 +28,14 @@
 | | | Status | `12340053-…` | NOTIFY | 有 | 12 B 状态 |
 
 UUID 全称规则：`1234 00XX 1234 5678 1234 56789abcdef0`，完整写法例如
-`12340021-1234-5678-1234-56789abcdef0`。**Android 端的 `BleConstants.kt` 是 UUID 的唯一出处**，
-OTA 相关 UUID 也在那里（刻意避免 `ota` → `bluetooth` → `ota` 的循环依赖）。
+`12340021-1234-5678-1234-56789abcdef0`。固件与 Android 各自声明这些 UUID；任何变更都必须
+同时核对 `ble_services.h` / `ble_ota.h` 与 `BleConstants.kt`。
 
-### ⚠️ 关于 `12340010`（时间同步"服务"）
+### 时间同步与电池电压的归属
 
-固件里定义了 `BT_UUID_TIME_SYNC_SERVICE_VAL = 12340010…`，但：
-
-- 该 UUID 的 service 变量是 `__maybe_unused`；
-- **没有任何 `BT_GATT_SERVICE_DEFINE` 使用它**；
-- 时间同步**特征** `12340011` 实际声明在 **配置服务 `12340020` 内部**（`src/main.c:1369`）。
-
-因此 App **不能**去 `discoverServices()` 里找 `12340010`，应当直接按特征 UUID
-`12340011` 读写（GATT 特征 UUID 全局唯一，放在哪个服务里不影响访问）。
-Android 端 `BleConstants.TIME_SYNC_CHAR = "12340011…"` 是正确的，
-且**没有**定义 `12340010` 常量——这是对的，不要"补"上。
-
-### ⚠️ 遗留/误用风险：`BleConstants.BATTERY_CHAR`
-
-Android 里 `BATTERY_CHAR = "12340026-…"` 与 `HISTORY_INFO_CHAR` **是同一个 UUID**，
-注释也已说明"当前固件未实现电池电量特性，该 UUID 已被历史信息特征占用，App 侧暂时屏蔽"。
-电池电压现在通过**实时数据帧的 offset 6**上报，不要用 `BATTERY_CHAR`。
+- 固件没有 `12340010` 服务；时间同步特征 `12340011` 属于配置服务 `12340020`。
+- `12340026` 只表示历史信息。Android 已删除早期与它冲突的 `BATTERY_CHAR` 别名。
+- 电池电压通过实时数据帧的 offset 6 上报。
 
 ---
 
@@ -141,8 +127,7 @@ Android 解析：`DeviceStatusParser`（支持 5 / 7 / 8 / 10 / 12 字节，缺�
 特殊值（`MaxMinTempParser`）：最高温和 `-32768(0x8000)` 且时间戳 0 → 未记录/已重置；
 最低温和 `32767(0x7FFF)` 且时间戳 0 → 未记录/已重置。
 
-> ⚠️ `BleConstants.MAX_MIN_TEMP_CHAR` 的注释写的是 "4字节"（旧格式），
-> **当前固件是 12 字节**。解析器同时支持 4 / 12 两种长度，行为正确，仅注释过期。
+> 当前固件发送 12 字节。Android 解析器仍兼容旧固件的 4 字节格式。
 
 ### 2.5 温度极值重置 `12340025`（WRITE）
 
@@ -180,8 +165,8 @@ Android 解析：`DeviceStatusParser`（支持 5 / 7 / 8 / 10 / 12 字节，缺�
 | 8 | 4 | uint32 | LE | 气压（**Pa**） |
 
 - 结构定义：`src/common.h:23`，由 `storage_write_batch()` 原样写入 Flash。
-- ⚠️ 字段名是 `pressure_centihpa`，**数值单位是 Pa**（1 Pa = 0.01 hPa，名字没错但极易误读）。
-  Android `HistoryDataParser`（V2 分支）按 `pressureRaw / 100.0f` 得到 hPa，与之吻合。
+- 固件字段名是 `pressure_pa`，数值单位是 Pa；Android `HistoryDataParser`（V2 分支）按
+  `pressureRaw / 100.0f` 得到 hPa。
 - 同一条 12 字节既用于 Flash 存储，也用于 BLE 通知，二者**同源同布局**。
 
 ### 3.2 传输协议
@@ -439,13 +424,9 @@ Android 侧 `OtaImageParser` 在**发送前**就校验 magic 与大小，magic �
 
 ---
 
-## 8. 已知的文档/代码不一致（**以代码为准**）
+## 8. 已清理的遗留冲突
 
-| 位置 | 文档/注释说 | 实际代码 |
-|---|---|---|
-| `README.rst` | LED = P0.31 / P0.30 | `board_pins.h`：DATA=P0.4、LINK=P0.5（P0.31/P0.30 是 SPI MOSI/SCK） |
-| `BleConstants.MAX_MIN_TEMP_CHAR` 注释 | "4字节" | 固件实发 **12 字节** |
-| `BleConstants.BATTERY_CHAR` | 电池电量特征 | 与 `HISTORY_INFO_CHAR` 同 UUID，**已被历史信息占用** |
-| `src/board_pins.h` | `MCU_MODEL "nRF52832"` | 量产硬件是 **nRF52810**（该宏是过期标识） |
-| `src/common.h` 字段名 | `pressure_centihpa` | 数值单位是 **Pa** |
-| `OTA_AUTH_KEY` 文档（历史版） | 写在 `ble_ota.h` 里 | 现已外置到 `src/ble/ota_auth_key.h`（不入库） |
+2026-09-15 已同步修正 README 的 LED 引脚、最高最低温度特征长度、MCU 型号、历史气压字段名，
+并删除冲突的 Android `BATTERY_CHAR` 与未注册的固件 `12340010` 声明。历史设计文档仍可能描述
+旧协议；当前协议只以本文件与两端代码为准。`OTA_AUTH_KEY` 继续由忽略文件注入，固件可信边界
+仍是 MCUboot ECDSA-P256 验签。

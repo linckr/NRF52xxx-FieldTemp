@@ -9,6 +9,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/spi.h>
 #include <zephyr/drivers/gpio.h>
+#include <pm_config.h>
 #include "../board_pins.h"
 
 #ifdef __cplusplus
@@ -45,11 +46,15 @@ extern "C" {
  *   0x028000 - 0x02DFFF : NVS (PM nvs_storage, 24 KiB)
  *   0x02E000 -           : history records
  */
-#define W25Q64_MCUBOOT_SECONDARY_BASE 0x000000
-#define W25Q64_MCUBOOT_SECONDARY_SIZE 0x028000
-#define W25Q64_NVS_BASE               0x028000
-#define W25Q64_NVS_SIZE               0x006000
-#define W25Q64_STORAGE_BASE           (W25Q64_NVS_BASE + W25Q64_NVS_SIZE)
+#define W25Q64_MCUBOOT_SECONDARY_BASE PM_MCUBOOT_SECONDARY_ADDRESS
+#define W25Q64_MCUBOOT_SECONDARY_SIZE PM_MCUBOOT_SECONDARY_SIZE
+#define W25Q64_NVS_BASE               PM_NVS_STORAGE_ADDRESS
+#define W25Q64_NVS_SIZE               PM_NVS_STORAGE_SIZE
+#define W25Q64_STORAGE_BASE           PM_NVS_STORAGE_END_ADDRESS
+
+#if PM_MCUBOOT_SECONDARY_END_ADDRESS != PM_NVS_STORAGE_ADDRESS
+#error "mcuboot_secondary and nvs_storage must be adjacent"
+#endif
 #define W25Q64_STORAGE_SIZE   0x100000  /* 1MB存储区域 */
 #define W25Q64_MAX_SECTORS    256       /* 1MB / 4KB = 256个扇区 */
 

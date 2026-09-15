@@ -67,7 +67,7 @@ MCUBOOT_BIN = os.path.join(os.pardir, "mcuboot", "zephyr", "zephyr.bin")
 MCUBOOT_ELF = os.path.join(os.pardir, "mcuboot", "zephyr", "zephyr.elf")
 MCUBOOT_CONFIG = os.path.join(os.pardir, "mcuboot", "zephyr", ".config")
 
-# 分区表中必须存在的分区（叶子 + 容器）
+# 分区表中必须存在的分区（叶子 + span 定义的容器）
 REQUIRED_PARTITIONS = [
     "mcuboot", "mcuboot_pad", "app", "mcuboot_primary",
     "mcuboot_secondary", "external_flash", "nvs_storage", "sram_primary",
@@ -323,17 +323,8 @@ def gate(build_dir, res, args):
     if any(name not in parts for name in REQUIRED_PARTITIONS):
         return measured
 
-    # C1. 容器 vs 叶子
-    # 两类都当作"容器"排除在重叠判定之外：
-    #   (a) **带 span 的分区** —— 这是 Nordic Partition Manager 官方定义的 container；
-    #   (b) **在同一介质（region+device）内完整包含另一个分区**的分区
-    #       （例如 external_flash 与 nvs_storage 地址重叠）。
-    # ⚠️ (b) 是本工具**自己的启发式**，不代表 PM 官方语义：
-    #    pm_static.yml 里的 external_flash 条目**没有 span**，其真实 PM 语义
-    #    （是否算容器、是否该保留该显式条目）**尚未核对**。
-    #    这里保留启发式只是为了让门禁不误报，**不等于"重叠是正常的"**。
-    #    必须限定同介质，否则会把跨介质、地址区间偶然包含的分区（如外 Flash 的
-    #    mcuboot_secondary 在数值上包住内部 Flash 的 mcuboot_pad）误判为容器。
+    # C1. 只有 Partition Manager 用 span 明确定义的条目才是容器。
+    # 其余条目一律按叶子检查；不要用“包含另一分区”之类的启发式掩盖重叠。
     def rng(key):
         p = parts[key]
         start = p.get("address", 0)
@@ -343,31 +334,10 @@ def gate(build_dir, res, args):
         p = parts[key]
         return (p.get("region"), p.get("device"))
 
-    containers = set()
-    for name, part in parts.items():
-        if part.get("span"):
-            containers.add(name)
-    span_containers = set(containers)
-    for name in parts:
-        if name in containers:
-            continue
-        lo, hi = rng(name)
-        for other in parts:
-            if other == name or other in containers:
-                continue
-            if bucket(other) != bucket(name):
-                continue
-            olo, ohi = rng(other)
-            if lo <= olo and ohi <= hi and (hi - lo) > (ohi - olo):
-                containers.add(name)
-                break
-    leaves = [n for n in parts if n not in containers]
-    heuristic_containers = containers - span_containers
+    containers = {name for name, part in parts.items() if part.get("span")}
+    leaves = [name for name in parts if name not in containers]
 
     # 只在「同 region 同 device」的叶子之间查重叠，避免跨介质误报
-    def bucket(key):
-        p = parts[key]
-        return (p.get("region"), p.get("device"))
 
     overlaps = []
     for i, a in enumerate(leaves):
@@ -383,12 +353,8 @@ def gate(build_dir, res, args):
         res.fail("C1 叶子分区不重叠", "\n".join(overlaps))
     else:
         detail = "%d 个叶子分区" % len(leaves)
-        if span_containers:
-            detail += "；span 定义的容器已排除：%s" % "、".join(sorted(span_containers))
-        if heuristic_containers:
-            detail += ("；另有 %s 按本工具启发式（同一介质内含住另一分区）视为伞形区排除，"
-                       "**该判定不代表 PM 官方语义，需单独核对**"
-                       % "、".join(sorted(heuristic_containers)))
+        if containers:
+            detail += "；span 定义的容器已排除：%s" % "、".join(sorted(containers))
         res.ok("C1 叶子分区不重叠", detail)
 
     # C2. mcuboot_primary 的 span 与实际地址自洽
@@ -485,19 +451,18 @@ def gate(build_dir, res, args):
         if lo % EXT_ALIGN or size % EXT_ALIGN:
             bad_align.append("%s addr=0x%x size=0x%x 未按 %d B 对齐"
                              % (name, lo, size, EXT_ALIGN))
+    nvs_lo, nvs_hi = rng("nvs_storage")
     for name in ext_leaves:
-        if name == "external_flash":
-            continue
         lo, hi = rng(name)
-        if lo < sec_hi and name != "mcuboot_secondary":
-            bad_order.append("%s 起始 0x%x 落在次级槽 [0x%x,0x%x) 内"
-                             % (name, lo, sec_lo, sec_hi))
+        if name not in ("mcuboot_secondary", "nvs_storage") and lo < nvs_hi:
+            bad_order.append("%s 起始 0x%x 侵入 secondary+NVS 保护区 [0x%x,0x%x)"
+                             % (name, lo, sec_lo, nvs_hi))
     if bad_align or bad_order:
         res.fail("H 外置 Flash 对齐与边界", "\n".join(bad_align + bad_order))
     else:
         res.ok("H 外置 Flash 对齐与边界",
-               "%s 全部 %d B 对齐；次级槽 [0x%x,0x%x) 未被其他分区侵入"
-               % ("、".join(sorted(ext_leaves)), EXT_ALIGN, sec_lo, sec_hi))
+               "%s 全部 %d B 对齐；secondary+NVS [0x%x,0x%x) 未被其他分区侵入"
+               % ("、".join(sorted(ext_leaves)), EXT_ALIGN, sec_lo, nvs_hi))
 
     # --- I. 配置不变量 ---------------------------------------------------
     app_cfg = read_config(os.path.join(build_dir, APP_CONFIG))

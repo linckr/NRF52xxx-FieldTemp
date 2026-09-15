@@ -6,10 +6,10 @@ from bleak import BleakClient, BleakScanner
 
 PREFIX = "PandaTemp"
 EXPECT = {
-    "12340010-1234-5678-1234-56789abcdef0": "time_sync",
     "12340020-1234-5678-1234-56789abcdef0": "config",
     "12340030-1234-5678-1234-56789abcdef0": "realtime",
     "12340040-1234-5678-1234-56789abcdef0": "clear_data",
+    "12340050-1234-5678-1234-56789abcdef0": "ota",
 }
 
 

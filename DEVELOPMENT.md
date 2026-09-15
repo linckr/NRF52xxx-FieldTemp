@@ -264,12 +264,12 @@ $HEX = "C:\Users\linckr\NRF52xxx-FieldTemp\build-v9\merged.hex"
 | `merged.hex` | **MCUboot + 主槽**（带绝对地址的 Intel HEX） | ✅ **首次 SWD 烧录 / 救砖** |
 | `dfu_application.zip` | 供 MCUboot **serial recovery** 的容器（含 manifest + 镜像） | ❌ 当前未启用 serial recovery，用不上 |
 
-参考大小（`build-pub`，2026-09-14）：
+参考大小（`build-pub`，2026-09-14；签名 TLV 长度可能逐次变化，应以当前构建产物为准）：
 
 | 产物 | 大小 |
 |---|---|
 | `zephyr.bin` | 149,528 B |
-| `zephyr.signed.bin` | 150,190 B |
+| `zephyr.signed.bin` | 150,191 B |
 | `merged.hex` | 512,122 B |
 | `dfu_application.zip` | 150,996 B |
 | `mcuboot/zephyr/zephyr.bin` | 31,876 B |

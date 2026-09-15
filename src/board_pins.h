@@ -58,7 +58,7 @@ extern "C" {
 /* ========== 硬件版本标识 ========== */
 #define BOARD_NAME         "E104-BT5010A"
 #define BOARD_VERSION      "1.1.3"
-#define MCU_MODEL          "nRF52832"
+#define MCU_MODEL          "nRF52810"
 
 #ifdef __cplusplus
 }

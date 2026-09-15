@@ -19,10 +19,10 @@
 | 硬件型号 | 模组 **E104-BT5010A**（亿佰特） |
 | MCU | **nRF52810**（QFAA，Cortex-M4 @ 64 MHz，192 KiB Flash / 24 KiB RAM） |
 | 外部 Flash | **W25Q64**（Winbond SPI NOR，8 MiB / 64 Mbit，JEDEC `ef 40 17`） |
-| 当前 BLE 架构 | 单一从设备（`CONFIG_BT_MAX_CONN=1`，无配对无加密），5 个 GATT 服务：配置 / 实时数据 / 清空数据 / OTA（+ 一个**未使用的** `12340010` 声明） |
+| 当前 BLE 架构 | 单一从设备（`CONFIG_BT_MAX_CONN=1`，无配对无加密），4 个自定义 GATT 服务：配置 / 实时数据 / 清空数据 / OTA；时间同步特征 `12340011` 属于配置服务 |
 | 当前 OTA 架构 | **自定义极简 BLE OTA**（非 mcumgr）：三特征（Control/Data/Status），分片写入外置 Flash 的 MCUboot 次级槽，支持断点续传，重启后由 MCUboot 验签并覆盖主槽 |
 | MCUboot 的作用 | 启动时校验主槽（`BOOT_VALIDATE_SLOT0=y`）；检测次级槽 trailer magic 触发升级；**用 ECDSA-P256 验签**，通过才把镜像从次级槽覆盖到主槽。它是 OTA 的**真正安全边界** |
-| App ↔ 固件关系 | 通过上述 GATT 协议通信。App **不解析** `12340010`，OTA 时发送的文件**必须是** `zephyr.signed.bin`。两侧的 OTA 授权密钥必须一致（各自经 gitignore 文件注入） |
+| App ↔ 固件关系 | 通过上述 GATT 协议通信。OTA 时发送的文件**必须是** `zephyr.signed.bin`。两侧的 OTA 授权密钥必须一致（各自经 gitignore 文件注入） |
 
 ---
 
@@ -100,9 +100,8 @@
 | High | **RAM 余量仅 1,624 B（93.39%）**。任何新功能（含继续用 mcumgr、加日志缓冲、加大包缓存）都极易把它打穿 |
 | High | **MCUboot 只剩 892 B**。任何往 MCUboot 加功能（serial recovery、加密、shell）都会溢出 |
 | High | **overwrite-only 无回滚**：升级过程中断电无法回退到旧固件（设计取舍，见 `OTA.md` §2.1） |
-| Medium | 内部 Flash 主槽只剩 13,138 B（相对 app 子区）。继续加 ROM 很快触红线 |
+| Medium | 签名镜像相对 app 子区只剩 13,137 B（仅作偏保守参考；正式门禁以 primary slot 与 6 KiB 预留计算）。继续加 ROM 很快触红线 |
 | Medium | `OTA_AUTH_KEY` 是**弱凭据**（公开可得），只防误触/DoS；若被恶意反复 START 会反复擦次级槽。真正的防线是 ECDSA 验签 |
-| Medium | `external_flash` 与 `nvs_storage` **地址重叠**（见 `HARDWARE.md` §8.3）。当前无代码使用 `FIXED_PARTITION_ID(external_flash)`，故未造成运行问题；但其 PM 语义未经核对，误用会连带擦掉 NVS 与历史 |
 | Low | 恢复出厂/换板时若只重烧 App、不清外置 Flash，历史写头可能与存量数据不一致 |
 | Low | WinRT BLE 栈成功率约 1/6，联调脚本必须整体重试 |
 
@@ -110,34 +109,26 @@
 
 | 项 | 说明 |
 |---|---|
-| `boards/nrf52810dk_nrf52810_cpuapp.overlay` | **永不生效的死文件**（board target 是 `nrf52dk/nrf52810`）。内容已与 `app.overlay` 重复且有漂移风险。建议删除或加更强警告，但**删之前要确认没人靠它当文档** |
-| `src/storage/w25q64.h` 的地址常量 | `W25Q64_NVS_BASE 0x028000` 等**重复定义了 PM 已提供的事实**。改分区必须同时改这里，否则历史区起点会错 |
-| `external_flash` 分区条目 | `pm_static.yml` 中它与 `nvs_storage` 地址重叠（`0x28000`–`0x800000` vs `0x28000`–`0x2E000`）。门禁 C1 按本项目自定的启发式把它排除在重叠判定外，但**这是我们的假设，不等于 PM 官方语义**（真正的 container 由 `span:` 定义，而该条目没有 `span:`）。**是否应保留该显式条目需单独核对**。**本任务未动**（改分区布局超出授权范围） |
-| `src/common.h` 的 `pressure_centihpa` 字段名 | 数值单位实际是 Pa，名字极易误读 |
+| `external_flash` 剩余区与业务 history | PM 自动生成的剩余区从 `0x2E000` 开始，业务 history 使用其前 1 MiB；禁止整区 `flash_area_erase/write` |
 | 实时帧与历史记录的**气压单位不一致** | 实时帧 = 0.1 hPa；历史记录 = Pa。改任一侧都是**破坏兼容性**的改动，只能靠文档标注 |
-| `src/board_pins.h` 的 `MCU_MODEL "nRF52832"` | 过期标识（量产是 nRF52810） |
-| `README.rst` 的 LED 引脚写错 | 写的是 P0.31/P0.30，实际是 P0.4/P0.5（且那两个脚是 SPI） |
-| `BleConstants.BATTERY_CHAR` 与 `HISTORY_INFO_CHAR` 同 UUID | 已被历史信息占用，App 侧已屏蔽电池功能但常量仍在 |
 | `MainViewModel.kt` 2753 行 | 体量大，职责偏多 |
 | Android 历史遗留文档含本机绝对路径 | `source/docs/*.md` 里有多处 `C:\Users\linckr\...`（**无凭据**，且账号名已随仓库公开，判定为无害路径文本） |
 | `tools/ota_host_client.py` 的 `--key` 与 `OTA_AUTH_KEY` 双入口 | 与固件/App 的单一注入入口相比略松，但保留了命令行覆盖能力，属可接受 |
 
 ---
 
-## 3. 最近一次可工作的版本
+## 3. 最近一次真机验证的功能基线
 
 | 项目 | 值 |
 |---|---|
 | Firmware branch | `main` |
-| Firmware commit | **`b97088d`** = 全部已真机验证的**固件代码**（`feat: 自定义 BLE OTA、电池电压上报与 MCUboot 双槽体系`）。<br>本批交接提交紧随其后（文档 + `tools/` 改动）→ **推送后 HEAD 即它**，用 `git log -1` 查 |
+| Firmware commit | **`b97088d`** = 已真机验证的固件功能基线。后续文档与清理提交不代表已真机回归；当前 HEAD 用 `git log -1` 查 |
 | Firmware commit 时间 | 2026-09-14 |
 | Firmware 远端同步 | ✅ 已推送到 `origin/main` |
-| Firmware 未提交修改 | **无**（工作区 clean） |
 | Android branch | `main` |
-| Android commit | **`f86f670`** = 上次真机联调的 **App 代码**（`feat: BLE OTA 客户端、电池电压展示与协议同步`）。<br>本批交接提交紧随其后（仅 `README.md` + `source/.gitignore`）→ 用 `git log -1` 查 |
+| Android commit | **`f86f670`** = 上次真机联调的 App 功能基线；当前 HEAD 用 `git log -1` 查 |
 | Android 远端同步 | ✅ 已推送到 `origin/main` |
-| Android 未提交修改 | **无**（工作区 clean） |
-| 两侧互相兼容的 commit | 固件 `b97088d` ↔ App `f86f670`（协议字段逐条核对一致，见 §11）。两者的**本批交接提交**都不改任何协议行为，故兼容关系不变 |
+| 两侧互相兼容的 commit | 固件 `b97088d` ↔ App `f86f670` 为真机功能基线。2026-09-15 清理仅修正 GATT Status 声明与死别名，UUID、报文及 OTA 命令布局不变；新 HEAD 的真机回归待做 |
 | 当前 firmware version | **`1.0.8+0`**（`VERSION` 文件：MAJOR 1 / MINOR 0 / PATCHLEVEL 8 / TWEAK 0） |
 | 当前 Android App version | `versionCode = 1`、`versionName = "1.0"`（**与固件版本无对应关系**） |
 | 当前 BLE protocol version | **当前没有独立的 BLE protocol version** —— 靠状态帧 `byte5` 能力位与帧长做隐式能力判断，见 `PROTOCOL.md` §6 |
@@ -213,14 +204,11 @@
 - **如何验证**：每个阶段重复若干次，复位后检查：主槽是否仍可启动、次级槽 trailer 状态、NVS 写头是否一致
 - **完成条件**：产出四个阶段的结论表，明确"哪些阶段断电会导致需要 SWD 救砖"
 
-### P4 — 清扫技术债（低风险项）
+### P4 — 清扫技术债（已于 2026-09-15 完成低风险项）
 
-按优先级：删除/加固死 overlay 文件 → 统一 `w25q64.h` 与 PM 的地址常量来源
-（例如用 `PM_*` 宏替代硬编码）→ 修正 `README.rst` 的 LED 引脚 → 修正
-`board_pins.h` 的 `MCU_MODEL` → 把 `pressure_centihpa` 改名为 `pressure_pa`（纯改名，不改协议）。
-
-> ⚠️ 改 `w25q64.h` 的常量来源属于**动分区布局的定义方式**，必须先确认与 `pm_static.yml`
-> 完全一致，并跑 `size_summary.py` 的 H/I 项。
+已删除死 overlay、改用 PM 宏作为 secondary/NVS/history 基址事实源、清除重叠静态分区条目，
+并修正 LED、MCU 型号和 `pressure_pa` 命名。完整 sysbuild、`size_summary.py` H/I 与发布门禁均通过；
+地址、报文布局和 MCUboot 配置未改变。
 
 ---
 
@@ -237,8 +225,8 @@
 | **ECDSA-P256 签名算法** | `SB_CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y` | 换算法等于换镜像格式，需要重烧 MCUboot 与全部 App 侧工具 |
 | **MCUboot 公钥 / 签名流程** | 公钥在构建期从私钥 PEM 提取并编进 MCUboot | 换私钥 = 换公钥 = **必须重烧 MCUboot**，否则设备拒绝所有新镜像 |
 | **BLE OTA packet format** | START 严格 61 B（`op1 + key16 + total4 + ih_ver8 + sha256_32`）；Status 严格 12 B | 两端逐字段对齐，改任一字节都会让另一侧解析错位 |
-| **Service UUID** | `12340010/20/30/40/50` 段 | App 的服务发现与降级路径依赖它们 |
-| **Characteristic UUID** | `12340011/21/22/23/24/25/26/31/41/51/52/53` | 同上。⚠️ 特别注意 `12340011`（时间同步）**实际声明在配置服务内部**，不要试图找 `12340010` 服务 |
+| **Service UUID** | `12340020/30/40/50` 段 | App 的服务发现与降级路径依赖它们 |
+| **Characteristic UUID** | `12340011/21/22/23/24/25/26/31/41/51/52/53` | 同上。`12340011`（时间同步）声明在配置服务内部 |
 | **firmware image format** | magic `0x96F3B83D`、`ih_hdr_size=512`、`ih_img_size`@`0x0C`、`ih_ver`@`0x14` | MCUboot 与 App 侧校验都按此偏移解析 |
 | **OTA 使用 `zephyr.signed.bin`** | App **必须**发 signed bin | 裸 bin 无头无签名；`merged.hex`/zip 格式不对。设备把字节原样写进次级槽，不做改造 |
 | **App 与 MCUboot 对 W25Q64 的访问方式** | MCUboot 与 App 都经 `nordic,pm-ext-flash = &w25q64` + `jedec,spi-nor` 驱动；OTA 只经 `flash_area(mcuboot_secondary)` | 换访问方式会让两边对同一颗芯片的理解不一致；绕过分区 API 就会越过安全边界 |
@@ -363,7 +351,7 @@ App 工程根目录 = 仓库根的 `source/`（Gradle 工程在 `source/`，不�
 
 ---
 
-## 8. 已知技术约束（数值均取自最近一次构建 `build-pub`）
+## 8. 已知技术约束（容量取自 2026-09-15 `build-conflict-fix`；构建目录本地忽略）
 
 | 项目 | 值 |
 |---|---|
@@ -375,7 +363,7 @@ App 工程根目录 = 仓库根的 `source/`（Gradle 工程在 `source/`，不�
 | App 分区（app slot） | 163,328 B（`0x27E00`） |
 | **App 当前 Flash 占用** | **149,528 B / 163,328 B = 91.55%**，剩余 **13,800 B** |
 | **App 当前 RAM 占用** | **22,952 B / 24,576 B = 93.39%**，剩余 **1,624 B** |
-| **当前 signed image 大小** | **150,190 B**；红线 157,696 B（= 主槽 163,840 − 6 KiB 预留），余 **7,506 B** |
+| **本次 signed image 大小** | **150,191 B**（ECDSA DER 长度可能逐次变化）；红线 157,696 B（= 主槽 163,840 − 6 KiB 预留），本次余 **7,505 B** |
 | BLE buffer 调优 | `BT_BUF_ACL_RX/TX_SIZE = 132`（= MTU 128 + 4）、`L2CAP_TX_MTU = 128`、`ACL_TX_COUNT = 4`、`L2CAP_TX_BUF_COUNT = 4`、`BT_BUF_CMD_TX_SIZE = 65`、`GATT_CACHING=n`、`ATT_PREPARE_COUNT=0` |
 | stack size 调整 | main 1024、system workqueue 1280、BT RX 1024、MPSL work 640、ISR 1024、idle 128 |
 | logging 当前状态 | **全关**：`CONFIG_LOG=n` |
@@ -477,14 +465,12 @@ App 工程根目录 = 仓库根的 `source/`（Gradle 工程在 `source/`，不�
 
 | # | 位置 | 文档/注释 | 实际 | 处理 |
 |---|---|---|---|---|
-| 1 | `README.rst`（上游原文） | LED：DATA=P0.31、LINK=P0.30 | `board_pins.h`：DATA=P0.4、LINK=P0.5；P0.31/P0.30 是 SPI MOSI/SCK | 已在 `HARDWARE.md`/`PROTOCOL.md` 标注；**未改原文**（属上游内容，改动需谨慎） |
-| 2 | `BleConstants.MAX_MIN_TEMP_CHAR` 注释 | "4字节：最高2+最低2" | 固件实发 **12 字节**（含时间戳） | 解析器已正确处理；已记入 `PROTOCOL.md` §8 |
-| 3 | `BleConstants.BATTERY_CHAR` | 电池电量特征 | 与 `HISTORY_INFO_CHAR` 同 UUID，**已被历史信息占用** | 已在 `PROTOCOL.md` 明确警示 |
-| 4 | `src/board_pins.h` | `MCU_MODEL "nRF52832"` | 量产硬件是 **nRF52810** | 记为技术债（P4） |
-| 5 | `src/common.h` | 字段名 `pressure_centihpa` | 数值单位是 **Pa** | 记为技术债（P4，纯改名） |
+| 1 | README LED、MCU 型号、历史气压字段名 | 与代码事实不一致 | 已修正；字段纯改名，12 B 布局不变 |
+| 2 | Android 极值长度与 `BATTERY_CHAR` | 注释长度错误，且 UUID 与历史信息冲突 | 注释已修正，冲突别名与空实现已删除 |
+| 3 | 固件 `12340010` 声明 | 声明成服务但从未注册 | 声明已删除；`12340011` 仍在配置服务内 |
+| 4 | `pm_static.yml` 显式 `external_flash` | 与 NVS 重叠 | 显式条目已删除；PM 自动剩余区从 `0x2E000` 开始 |
 | 6 | 实时帧 vs 历史记录的气压单位 | — | 实时帧 = **0.1 hPa**；历史记录 = **Pa** | 属**协议事实**，不能悄悄统一（会破坏兼容）。已在 `PROTOCOL.md` §4 明确警示 |
 | 7 | 旧文档（本任务前的交接/说明文档） | `OTA_AUTH_KEY` 写在 `ble_ota.h`、构建脚本默认使用本机私钥路径 | 均已外置/移除 | 已在本套文档中标注为「历史方案（已废弃）」 |
-| 8 | `boards/nrf52810dk_nrf52810_cpuapp.overlay` | 内容看起来像"正在生效的板级配置" | **永不生效**（board 名不匹配） | 文件顶部已有 WARNING；`HARDWARE.md` §2 再次强调 |
 | 9 | `CLAUDE.md`（工程指令文件） | `E104-BT5010A 194KB FLASH 24K RAM`、`W25Q64 SLK 30` | 实际 **192 KiB Flash / 24 KiB RAM**；引脚名是 **SCK** | **已修正**（同类错误也在 `docs/2026-1-30优化方案.md`、`docs/GPIO引脚定义.md` 一并修正） |
 
 ---
@@ -501,18 +487,15 @@ App 工程根目录 = 仓库根的 `source/`（Gradle 工程在 `source/`，不�
 
 ### Medium
 4. **手机端** OTA 客户端尚未在固件 `1.0.8+0` 上做真机回归（PC 侧 `ota_host_client.py` 已完成两轮）。
-5. `external_flash` 分区条目与 NVS 地址重叠（潜在误用点）；其 PM 语义与是否保留该条目**尚未核对**。
-6. overwrite-only 无回滚能力，断电场景未做完整矩阵。
-7. 历史记录不含电压（`HistoryRecordFormat.V3` 预留但无能力位可用）。
-8. 生产签名密钥不存在，上线前必须生成并重烧 MCUboot。
-9. 存量设备若只重烧 App、不清外置 Flash，历史写头可能不一致。
+5. overwrite-only 无回滚能力，断电场景未做完整矩阵。
+6. 历史记录不含电压（`HistoryRecordFormat.V3` 预留但无能力位可用）。
+7. 生产签名密钥不存在，上线前必须生成并重烧 MCUboot。
+8. 存量设备若只重烧 App、不清外置 Flash，历史写头可能不一致。
 
 ### Low
-10. `w25q64.h` 与 PM 的地址常量存在重复定义。
-11. `README.rst` LED 引脚错误、`board_pins.h` MCU 型号过期、`pressure_centihpa` 命名误导。
-12. `MainViewModel.kt` 2753 行，体量偏大。
-13. Android 历史遗留文档含本机绝对路径（无凭据）。
-14. `tools/ota_host_client.py` 的密钥入口（`--key` 与环境变量）与固件/App 的单一注入入口略不一致。
+9. `MainViewModel.kt` 体量大，职责偏多。
+10. Android 历史遗留文档含本机绝对路径（无凭据）。
+11. `tools/ota_host_client.py` 的密钥入口（`--key` 与环境变量）与固件/App 的单一注入入口略不一致。
 
 ---
 

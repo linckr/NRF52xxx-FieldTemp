@@ -38,14 +38,14 @@ Android  : C:\Users\linckr\Documents\Codex\2026-09-08\referenced-chatgpt-convers
 
 ---
 
-## Current Commits
+## 已真机验证的代码基线 commits
 
 | 仓库 | branch | commit |
 |---|---|---|
-| Firmware | `main` | **`b97088d`** = 全部已真机验证的**固件代码**。本批交接提交紧随其后（文档 + `tools/` 改动）→ **推送后 HEAD 就是它**，用 `git log -1` 查 |
-| Android | `main` | **`f86f670`** = 上次真机联调的 **App 代码**。本批交接提交紧随其后（仅 `README.md` + `source/.gitignore`）→ 用 `git log -1` 查 |
+| Firmware | `main` | **`b97088d`** = 已真机验证的固件功能基线；后续文档与清理提交不代表已真机回归 |
+| Android | `main` | **`f86f670`** = 上次真机联调的 App 功能基线；后续提交需分别验证 |
 
-> ✅ 上述固件改动**已完成真机 OTA 回归**（见下方 Current Status），可以放心作为基线。
+> 上述 commit 是**真机验证基线**，不是持续更新的 HEAD。当前 HEAD 请在两个仓库各自运行 `git log -1` 核对；2026-09-15 的配置/文档清理仅完成静态构建与门禁，未重新烧录真机。
 
 固件版本号：**`1.0.8+0`**（来源：仓库根 `VERSION`）。
 App 版本：`versionCode 1` / `versionName "1.0"`（**与固件版本无对应关系**）。
@@ -174,7 +174,8 @@ Android → BLE（服务 12340050，Control/Data/Status 三特征）
 `g_vdd_mv` / `g_vdd_min_mv` / `g_vdd_max_mv`（符号地址随构建变化，用 `nm` 从
 `build-verify2/.../zephyr.elf` 现取）。⚠️ pyOCD 连接会 halt 核，读完记得 `resume`。
 
-之后按优先级依次是 P2（历史含电压的能力位驱动）、P3（断电专项矩阵）、P4（技术债清扫）。
+之后按优先级依次是 P2（历史含电压的能力位驱动）、P3（断电专项矩阵）。P4 的低风险技术债
+已于 2026-09-15 清理完成；详情见 `HANDOFF.md` §4。
 完整任务清单（含每项的涉及文件 / 不能破坏的接口 / 验证方式 / 完成条件）见 `HANDOFF.md` §4。
 
 ---

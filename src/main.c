@@ -7,7 +7,7 @@
  *   CONFIG_CLOCK_CONTROL_NRF_K32SRC_RC=y  (使用内部 RC 作为 32kHz 时钟源)
  *   这确保系统不会因等待外部晶振起振而卡死
  * 
- * - LED 配置：DATA LED: P0.31, LINK LED: P0.30
+ * - LED 配置：DATA LED: P0.4, LINK LED: P0.5
  *   LED 为低电平有效（低电平点亮，高电平熄灭）
  *   DATA LED 用于指示数据状态
  *   LINK LED 用于指示蓝牙连接状态
@@ -62,7 +62,6 @@ static void history_send_work_handler(struct k_work *work);
 
 // UUID 宏定义使用 ble/ble_services.h 中的版本
 // UUID 结构体变量（用于 BT_GATT_SERVICE_DEFINE）
-static struct bt_uuid_128 time_sync_service_uuid __maybe_unused = BT_UUID_INIT_128(BT_UUID_TIME_SYNC_SERVICE_VAL);
 static struct bt_uuid_128 time_sync_char_uuid = BT_UUID_INIT_128(BT_UUID_TIME_SYNC_CHAR_VAL);
 
 static struct bt_uuid_128 config_service_uuid = BT_UUID_INIT_128(BT_UUID_CONFIG_SERVICE_VAL);
@@ -489,7 +488,7 @@ static void history_push_record(uint32_t ts, int16_t temperature,
 	ram_buffer[ram_buffer_count].timestamp = ts;
 	ram_buffer[ram_buffer_count].temperature = temperature;
 	ram_buffer[ram_buffer_count].humidity = humidity;
-	ram_buffer[ram_buffer_count].pressure_centihpa = pressure_pa;
+	ram_buffer[ram_buffer_count].pressure_pa = pressure_pa;
 	ram_buffer_count++;
 	record_count++;
 
@@ -2238,9 +2237,9 @@ static void storage_write_batch(void)
 		}
 		
 		// 4. 检查气压 (10000 ~ 200000)
-		if (ram_buffer[i].pressure_centihpa < 10000 || ram_buffer[i].pressure_centihpa > 200000) {
+		if (ram_buffer[i].pressure_pa < 10000 || ram_buffer[i].pressure_pa > 200000) {
 			printk("[存储] 警告: 发现无效气压记录 (%u, 索引 %d)，已过滤\r\n", 
-			       ram_buffer[i].pressure_centihpa, i);
+			       ram_buffer[i].pressure_pa, i);
 			is_valid = false;
 		}
 
@@ -2822,7 +2821,7 @@ static void history_send_work_handler(struct k_work *work)
 		
 		// 检查数据是否全0（可能是未初始化的数据）
 		// 注意：这个检查已经在前面处理过timestamp==0的情况，这里作为额外安全检查
-		if (rec.timestamp == 0 && rec.temperature == 0 && rec.humidity == 0 && rec.pressure_centihpa == 0) {
+		if (rec.timestamp == 0 && rec.temperature == 0 && rec.humidity == 0 && rec.pressure_pa == 0) {
 			// 全0数据，跳过（已在前面检查过timestamp==0，这里作为额外检查）
 			// 注意：records_scanned已经在前面增加了，这里不需要再次增加
 			continue;
@@ -2839,26 +2838,9 @@ static void history_send_work_handler(struct k_work *work)
 		}
 		
 		// 检查气压范围 (100hPa ~ 2000hPa -> 10000Pa ~ 200000Pa)
-		if (rec.pressure_centihpa < 10000 || rec.pressure_centihpa > 200000) {
+		if (rec.pressure_pa < 10000 || rec.pressure_pa > 200000) {
 			data_valid = false;
 		}
-		
-		// 额外检查：如果湿度或气压值异常大（可能是地址错位），即使通过了范围检查也要标记为异常
-		// 例如：湿度27001（270.01%）或气压值>1000000（10000hPa）明显异常
-		// 注意：正常湿度范围是0-100%，即0-10000（0.01%单位），如果>6553（65.53%）但<10000，可能是传感器异常
-		// 如果>10000，已经在前面检查过了，这里主要检查异常大的值（可能是地址错位导致读取了错误位置的数据）
-		// if (rec.humidity > 6553 || rec.pressure_centihpa > 1000000) {
-		// 	printk("[历史] 警告: 数据值异常大，可能是地址错位 (湿度:%u, 气压:%u)，跳过此记录 (扇区:%d, 记录索引:%d, 时间戳:%u)\r\n",
-		// 	       rec.humidity, rec.pressure_centihpa, history_transfer_sector, history_transfer_record_idx + records_scanned - 1, rec.timestamp);
-		// 	data_valid = false;
-		// }
-		
-		// // 数据一致性检查：如果温度、湿度、气压都是0，但时间戳不为0，可能是数据损坏
-		// if (rec.timestamp != 0 && rec.temperature == 0 && rec.humidity == 0 && rec.pressure_centihpa == 0) {
-		// 	printk("[历史] 警告: 数据一致性异常 (时间戳:%u但其他数据全0)，跳过此记录 (扇区:%d, 记录索引:%d)\r\n",
-		// 	       rec.timestamp, history_transfer_sector, history_transfer_record_idx + records_scanned - 1);
-		// 	data_valid = false;
-		// }
 		
 		if (!data_valid) {
 			// 数据异常，跳过此记录

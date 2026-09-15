@@ -36,9 +36,3 @@ nvs_storage:
   size: 0x6000
   region: external_flash
   device: W25Q64
-
-external_flash:
-  address: 0x28000
-  size: 0x7d8000
-  region: external_flash
-  device: W25Q64

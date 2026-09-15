@@ -1,6 +1,6 @@
 # OTA.md — OTA 架构与升级链路
 
-> 本文描述**当前实际实现**。所有体积数字取自最近一次构建（`build-pub`，2026-09-14）。
+> 本文描述**当前实际实现**。所有体积数字取自最近一次构建（2026-09-15 clean sysbuild）。
 > 协议字段级定义见 `PROTOCOL.md` §5；构建命令见 `DEVELOPMENT.md`。
 
 ---
@@ -38,12 +38,12 @@ Application（新固件启动；验签不过则不搬运，设备继续跑旧固
 
 | 项目 | 值 | 来源 |
 |---|---|---|
-| 分区 | `mcuboot` `0x00000`–`0x08000` | `pm_static.yml` / `build-pub/partitions.yml` |
+| 分区 | `mcuboot` `0x00000`–`0x08000` | `pm_static.yml` / `<sysbuild>/partitions.yml` |
 | 分区大小 | **32,768 B（32 KiB）** | 同上 |
-| **当前实际大小** | **31,876 B（97.28%）** | `build-pub/mcuboot/zephyr/zephyr.bin` |
+| **当前实际大小** | **31,876 B（97.28%）** | `<sysbuild>/mcuboot/zephyr/zephyr.bin` |
 | Flash 剩余空间 | **892 B**（门禁下限 800 B，属 **WARN 但 PASS**） | `tools/size_summary.py` E 项 |
 | RAM 占用 | **10,432 B / 24,576 B = 42.45%** | 构建日志 `Memory region` |
-| `CONFIG_MAIN_STACK_SIZE` | 4096 | `build-pub/mcuboot/zephyr/.config` |
+| `CONFIG_MAIN_STACK_SIZE` | 4096 | `<sysbuild>/mcuboot/zephyr/.config` |
 | `CONFIG_BOOT_MAX_IMG_SECTORS` | 128 | `sysbuild/mcuboot.conf` |
 | `CONFIG_UPDATEABLE_IMAGE_NUMBER` | 1 | 单向 single-image 升级 |
 
@@ -66,7 +66,7 @@ Application（新固件启动；验签不过则不搬运，设备继续跑旧固
 
 ### 2.2 serial recovery
 
-**未启用。** `build-pub/mcuboot/zephyr/.config` 中不存在 `CONFIG_MCUBOOT_SERIAL` /
+**未启用。** `<sysbuild>/mcuboot/zephyr/.config` 中不存在 `CONFIG_MCUBOOT_SERIAL` /
 `CONFIG_BOOT_SERIAL_*`，`sysbuild/mcuboot.conf` 里也是 `CONFIG_SERIAL=n` / `CONFIG_UART_CONSOLE=n`。
 
 **为什么不启用**：MCUboot 只剩 **892 B** 空间。serial recovery 会拉进 UART 驱动 +
@@ -118,10 +118,10 @@ Application（新固件启动；验签不过则不搬运，设备继续跑旧固
 **签名产物**：`<build>/NRF52xxx-FieldTemp/zephyr/zephyr.signed.bin`
 （构建由 sysbuild 自动调用 imgtool，**不需要手工执行 `imgtool sign`**）。
 
-| 项目 | 值（`build-pub`） |
+| 项目 | 参考值（`build-conflict-fix`，2026-09-15） |
 |---|---|
 | `zephyr.bin`（裸应用） | 149,528 B |
-| `zephyr.signed.bin` | **150,190 B** |
+| `zephyr.signed.bin` | **150,191 B** |
 | 镜像头 | magic `0x96F3B83D`、`ih_hdr_size = 512`、`ih_img_size` @ `0x0C`、`ih_ver` @ `0x14` |
 | `ih_ver` | `1.0.8+0` |
 
@@ -144,7 +144,7 @@ Application（新固件启动；验签不过则不搬运，设备继续跑旧固
 ```
 $ PYTHONPATH=C:/ncs/v3.2.1/bootloader/mcuboot/scripts \
   <ncs-python> -m imgtool.main verify --key <root-ec-p256.pem> \
-  build-pub/NRF52xxx-FieldTemp/zephyr/zephyr.signed.bin
+  <sysbuild>/NRF52xxx-FieldTemp/zephyr/zephyr.signed.bin
 Image was correctly validated
 Image version: 1.0.8+0
 Image digest: 58f917bd62e97bbfd33a95139e2dc82afcef4d3c60032c819b34c650c05450f7
@@ -288,9 +288,9 @@ flash_img_buffered_write(&ota_ctx, data, len, flush);
 2. **容量检查**：`ota_total > ota_fa->fa_size` → `err=3 TOO_LARGE`，**在擦除之前**拒绝。
 3. **并发互斥**：OTA 期间暂停历史落盘与 NVS 写入（见 §4.2）。
 
-⚠️ 仍然**不要**对 `external_flash` 分区条目做任何 `flash_area` 操作
-（它按地址覆盖 `0x28000`–`0x800000`，与 NVS/历史重叠；其 PM 语义尚未核对，
-见 `HARDWARE.md` §8.3）。
+Partition Manager 当前自动生成 `external_flash [0x2E000, 0x800000)` 作为剩余区；它不再与 NVS
+重叠，但覆盖业务自管 history 区。因此 OTA 只能打开 `mcuboot_secondary`，不得对整个
+`external_flash` 执行擦写。
 
 ### 5.4 OTA 完成后 MCUboot 如何发现镜像
 
@@ -342,4 +342,4 @@ MCUboot 随后按固定布局解析（magic `0x96F3B83D`、`ih_hdr_size = 512`�
 | **现场 OTA** | **`zephyr.signed.bin`** | Android App 或 `tools/ota_host_client.py` |
 | 只更 MCUboot | `build-*/mcuboot/zephyr/zephyr.hex` | pyOCD（注意会动 `0x0`–`0x8000`） |
 
-参考产物大小（`build-pub`）：`merged.hex` 512,122 B、`dfu_application.zip` 150,996 B。
+2026-09-15 clean sysbuild 参考产物：`merged.hex` 512,120 B、`dfu_application.zip` 150,997 B。

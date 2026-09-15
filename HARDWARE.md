@@ -2,7 +2,7 @@
 
 > 本文所有引脚与地址均从**当前仓库实际代码与最近一次构建产物**读取，不从记忆或设计稿抄录。
 > 取证来源：`app.overlay`、`sysbuild/mcuboot.overlay`、`src/board_pins.h`、`pm_static.yml`、
-> 构建产物 `build-pub/partitions.yml` 与 `pm_config.h`。
+> 构建产物 `<sysbuild>/partitions.yml` 与 `pm_config.h`。
 
 ---
 
@@ -48,19 +48,15 @@
 | **P0.30** | **W25Q64 SCK** | 输出 | SPIM_SCK |
 | **P0.31** | **W25Q64 MOSI** | 输出 | SPIM_MOSI |
 
-> ⚠️ **上游 README.rst 写的 LED 引脚（P0.31 / P0.30）是错的**，与 `board_pins.h` 不一致，
-> 而且那两个脚现在是 SPI 的 MOSI/SCK。以 `board_pins.h` 与 `app.overlay` 为准。
+> `README.rst`、`board_pins.h` 与 `app.overlay` 已统一为上述引脚；P0.30 / P0.31 仅用于 SPI。
 
 ### ⚠️ 引脚为什么必须写在 `app.overlay` 里
 
 Zephyr 的 `cmake/modules/configuration_files.cmake` 在找到匹配的
 `boards/<board>_<soc>.overlay`（即 `nrf52dk_nrf52810.overlay`）后**就不再读 `app.overlay`**。
 
-- 仓库里的 `boards/nrf52810dk_nrf52810_cpuapp.overlay` **永远不会生效**：
-  board target 是 `nrf52dk/nrf52810`，不存在 `nrf52810dk` 这个 board。
-  该文件顶部已写明 "this file is NOT used by any build"，**不要**试图靠改名"修好"它
-  —— 一旦匹配上，它会**顶替** `app.overlay`，导致 SPI0 悄悄回落到 nRF52 DK 默认引脚
-  （SCK=P0.29 / MISO=P0.30 / 无 CS），**W25Q64 直接连不上**。原版固件就是这么坏的。
+- 旧的 `boards/nrf52810dk_nrf52810_cpuapp.overlay` 因 board 名不匹配而永远不会生效，现已删除。
+  App 的板级引脚只维护在 `app.overlay`；不要新增会抢占它的匹配 board overlay。
 - MCUboot 与 App 是**两套独立 devicetree**，改引脚必须同时改
   `app.overlay` 与 `sysbuild/mcuboot.overlay`。
 
@@ -118,7 +114,7 @@ Zephyr 的 `cmake/modules/configuration_files.cmake` 在找到匹配的
 | 是否用于日志 | **发布态不用**：`CONFIG_CONSOLE=n` / `CONFIG_PRINTK=n` / `CONFIG_LOG=n`，串口无输出 |
 | 是否用于 bootloader | **否** |
 | 是否支持首次烧录 | **否**（无 bootloader 串口协议；首次烧录走 SWD，见 §7） |
-| MCUboot serial recovery | **未启用**（`build-pub/mcuboot/zephyr/.config` 中无 `CONFIG_MCUBOOT_SERIAL` / `CONFIG_BOOT_SERIAL_*`） |
+| MCUboot serial recovery | **未启用**（`<sysbuild>/mcuboot/zephyr/.config` 中无 `CONFIG_MCUBOOT_SERIAL` / `CONFIG_BOOT_SERIAL_*`） |
 
 ### 为什么现在不启用 serial recovery
 
@@ -203,8 +199,8 @@ serial recovery 会拉进 UART 驱动、帧协议、`boot_serial` 与命令处�
 数据来源（三者一致，已交叉核对）：
 
 - `pm_static.yml`（人工维护的 PM 静态布局，唯一编辑入口）
-- `build-pub/partitions.yml`（PM 生成）
-- `build-pub/*/zephyr/include/generated/pm_config.h`（PM 生成的宏，即代码实际看到的）
+- `<sysbuild>/partitions.yml`（PM 生成）
+- `<sysbuild>/*/zephyr/include/generated/pm_config.h`（PM 生成的宏，即代码实际看到的）
 
 ### 8.1 内部 nRF52810 Flash（192 KiB = `0x00000`–`0x30000`）
 
@@ -224,52 +220,23 @@ serial recovery 会拉进 UART 驱动、帧协议、`boot_serial` 与命令处�
 | 区域 | 起始 | 结束 | 大小 | PM ID | 说明 |
 |---|---|---|---|---|---|
 | `mcuboot_secondary` | `0x000000` | `0x028000` | **163,840 B (160 KiB)** | 1 | OTA 下载目标槽；与主槽严格等大 |
-| `nvs_storage` | `0x028000` | `0x02E000` | **24,576 B (24 KiB)** | 7 | Zephyr NVS：写头/配置/时间基准/OTA 续传态 |
+| `nvs_storage` | `0x028000` | `0x02E000` | **24,576 B (24 KiB)** | 6 | Zephyr NVS：写头/配置/时间基准/OTA 续传态 |
 | **history records** | `0x02E000` | `0x12E000` | **1,048,576 B (1 MiB)** | **无 PM 条目** | 业务自管，基址 `W25Q64_STORAGE_BASE` |
 | 剩余未分配 | `0x12E000` | `0x800000` | **7,151,616 B（约 6.82 MiB）** | — | 当前未使用 |
 
-> 历史区**不在 `pm_static.yml` 里**，由 `src/storage/w25q64.h` 定义：
-> `W25Q64_STORAGE_BASE = W25Q64_NVS_BASE(0x28000) + W25Q64_NVS_SIZE(0x6000) = 0x2E000`，
-> `W25Q64_STORAGE_SIZE = 0x100000`（1 MiB），`W25Q64_MAX_SECTORS = 256`（4 KiB 扇区）。
+> 历史区**不在 `pm_static.yml` 里**。`src/storage/w25q64.h` 直接引用 PM 生成的
+> `PM_NVS_STORAGE_END_ADDRESS` 作为 `W25Q64_STORAGE_BASE`（当前为 `0x2E000`），并用编译期检查
+> 保证 secondary 与 NVS 相邻。历史区大小仍为 1 MiB、256 个 4 KiB 扇区。
 
-### 8.3 ⚠️ `external_flash` 这个"分区"是什么（**结论未定，勿当定论**）
+### 8.3 `external_flash` 剩余区
 
-`pm_static.yml` 里还有一条：
+`pm_static.yml` 只显式固定 `mcuboot_secondary` 与 `nvs_storage`。Partition Manager 会把余下空间
+自动生成为 `external_flash [0x02E000, 0x800000)`；它不再与 NVS 重叠。构建门禁把它作为普通叶子
+分区参与重叠和边界检查，不再用“包含另一分区即视为容器”的启发式豁免。
 
-```yaml
-external_flash:
-  address: 0x28000
-  size: 0x7d8000
-  region: external_flash
-  device: W25Q64
-```
-
-**事实部分（可从构建产物直接读出）**：
-
-- PM 确实为它生成了分区条目：`PM_EXTERNAL_FLASH_ID = 6`、
-  `address = 0x28000`、`end_address = 0x800000`、`size = 0x7d8000`。
-- **它与 `nvs_storage`（ID 7，`0x28000`–`0x2E000`）地址重叠。**
-- 当前**没有任何代码**使用 `FIXED_PARTITION_ID(external_flash)`，
-  因此这一重叠**未造成运行问题**；当前构建与门禁都允许该布局。
-
-**不能据此断言的部分**：
-
-> 本项目的 `tools/size_summary.py` 在 C1 检查里把 `external_flash` 判为"容器"从而排除在
-> 重叠判定之外 —— 但那是**我们工具里的启发式**（判定规则是"带 `span` 的分区，
-> **或**在同一 region+device 内完整包含另一个分区"），**不等于** Nordic Partition Manager 的
-> 官方语义。而 PM 文档规定真正的 **container partition 是通过 `span:` 定义的**，
-> 本条 YAML **没有 `span:`**；同时 external-flash region 本身还存在
-> "剩余区域使用与 region 同名分区"的特殊语义。
-
-**因此正确的表述是**：`external_flash` 与 `nvs_storage` 地址存在重叠；当前构建与门禁允许
-这一布局，且当前代码没有通过 `FIXED_PARTITION_ID(external_flash)` 使用它，因此未造成运行问题。
-**其具体 PM 语义、以及是否应该保留该显式条目，需要单独核对后再调整。**
-
-**在核对清楚之前**：
-
-- 禁止对 `external_flash` 调用任何 `flash_area_erase/write` —— 无论它到底是容器还是叶子分区，
-  按地址算都会覆盖 NVS 与历史。
-- 属于**技术债**，本任务不动分区布局（见 `HANDOFF.md` §2.8 与 §5）。
+业务历史区 `[0x02E000, 0x12E000)` 由原始 W25Q64 驱动管理，位于该剩余区前 1 MiB。当前代码没有
+通过 `FIXED_PARTITION_ID(external_flash)` 访问剩余区；后续也不得对整个 `external_flash` 执行
+`flash_area_erase/write`，否则会覆盖历史记录。
 
 ---
 
