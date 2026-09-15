@@ -46,7 +46,7 @@
 | **MCUboot 拒绝坏签名** | 把签名 TLV 翻 1 字节后 TRIGGER，**主槽 `img_size` 未变**且设备健康 |
 | 电池电压端到端 | 手机界面显示 `3.3V`，帧 offset 6 = `0x0D00`（3328 mV） |
 | 栈高水位（含 OTA 全路径） | RX 峰值 648/1024（空闲 376）、workq 968/1280、main 696/1024、mpsl 400/640、ISR 600/1024，全部 ≥128 B |
-| **本批交接改动的真机 OTA 回归**（2026-09-14） | 两轮连续 OTA，判据 = 主槽 `img_size`：<br>· 轮 1 推 `build-stk8`（149,560 B）→ 主槽 **149,528 → 149,560** ✅<br>· 轮 2 推 `build-verify2`（发布镜像，149,528 B）→ 主槽 **149,560 → 149,528** ✅（设备恢复发布态）<br>两轮 `ih_ver` 都是 `1.0.8+0` —— **版本号没变、二进制变了**，判决全部依赖主槽内容。OTA 后 BLE 健康检查：状态帧 12 B / 能力位 `0x3F` / 实时帧 8 B / 电压 3.324 V / 记录数 4167 |
+| **2026-09-14 交接批次的真机 OTA 回归** | 两轮连续 OTA，判据 = 主槽 `img_size`：<br>· 轮 1 推 `build-stk8`（149,560 B）→ 主槽 **149,528 → 149,560** ✅<br>· 轮 2 推 `build-verify2`（发布镜像，149,528 B）→ 主槽 **149,560 → 149,528** ✅（设备恢复发布态）<br>两轮 `ih_ver` 都是 `1.0.8+0` —— **版本号没变、二进制变了**，判决全部依赖主槽内容。OTA 后 BLE 健康检查：状态帧 12 B / 能力位 `0x3F` / 实时帧 8 B / 电压 3.324 V / 记录数 4167 |
 
 ### 2.2 已完成并通过**编译/构建验证**（无真机验证）
 
@@ -141,7 +141,7 @@
 
 > 每项都给出：为什么 / 涉及文件 / 已有基础 / 不能破坏的接口 / 如何验证 / 完成条件。
 
-### P0 — ✅ **已完成**（本批交接改动的真机回归与落地）
+### P0 — ✅ **已完成**（2026-09-14 交接批次的真机回归与落地）
 
 按用户规定的顺序执行完毕：
 
@@ -248,8 +248,6 @@ NRF52xxx-FieldTemp/
 ├── pm_static.yml               # ⭐ Partition Manager 静态布局（唯一编辑入口）
 ├── sysbuild.conf               # sysbuild 级：MCUboot / overwrite-only / 外置次级槽 / ECDSA-P256
 ├── CMakeLists.txt              # 源文件清单（新增 .c 必须在这里登记）
-├── boards/
-│   └── nrf52810dk_nrf52810_cpuapp.overlay   # ⚠️ 死文件，永不生效（见 HARDWARE.md §2）
 ├── sysbuild/
 │   ├── mcuboot.conf            # MCUboot Kconfig（SPI NOR / 布局页 4096 / RC 32k / 关日志 / 栈 4096）
 │   └── mcuboot.overlay         # MCUboot 的 devicetree（与 App 独立，改引脚要同步）
@@ -396,7 +394,7 @@ App 工程根目录 = 仓库根的 `source/`（Gradle 工程在 `source/`，不�
 
 ## 10. Git 与仓库清理
 
-### 10.1 应该提交
+### 10.1 2026-09-14 已提交内容（历史记录）
 
 > ✅ **提交时机已满足**：这一批已按 §4 P0 跑完「构建 → 门禁 → 真机 OTA 回归（两轮通过）」，
 > 并已提交推送。以下是该提交的内容清单。
@@ -439,21 +437,21 @@ App 工程根目录 = 仓库根的 `source/`（Gradle 工程在 `source/`，不�
 | # | 检查项 | 结论 |
 |---|---|---|
 | 1 | 文档中的 Flash 地址是否与 `partitions.yml` 一致 | ✅ `HARDWARE.md` §8 三处交叉核对（`pm_static.yml` / `partitions.yml` / `pm_config.h`） |
-| 2 | 文档中的 pin 是否与 overlay 一致 | ✅ 与 `app.overlay` 逐行一致；**并已指出 `README.rst` 的 LED 引脚是错的** |
-| 3 | BLE UUID 是否与两端一致 | ✅ 固件 `ble_services.h`/`ble_ota.h` 与 App `BleConstants.kt` 逐条比对一致（含 `12340026` 双重语义） |
+| 2 | 文档中的 pin 是否与 overlay 一致 | ✅ `app.overlay`、`HARDWARE.md` 与 `README.rst` 已统一 |
+| 3 | BLE UUID 是否与两端一致 | ✅ 两端逐条一致；`12340026` 只表示历史信息，且不存在 `12340010` 服务 |
 | 4 | OTA packet 格式是否与两端代码一致 | ✅ START 61 B / Status 12 B / 操作码 0x01–0x04 / 错误码 0–11 全部逐字段核对 |
 | 5 | Android 发送的固件文件类型是否正确 | ✅ `OtaImageParser` 强制校验 magic，`OtaConstants.REQUIRED_FILE_HINT = "zephyr.signed.bin"` |
 | 6 | build command 是否能够实际执行 | ✅ 用新 `--signing-key` 参数实际跑通 pristine sysbuild，**并用其产物完成两轮真机 OTA**；Android `testDebugUnitTest`+`assembleDebug` 实际跑通 |
 | 7 | signing key 传入方式是否与构建脚本一致 | ✅ `DEVELOPMENT.md` §2 与脚本实现一致（CLI > 环境变量 > 报错） |
 | 8 | 文档中是否还残留废弃设计 | ✅ 所有历史方案均标注「历史方案（已废弃）」：硬编码私钥路径、明文 `OTA_AUTH_KEY`、旧裸 SPI 驱动、旧内部 NVS、旧历史区 `0x0` 起点、`>=3 ⇒ V3` 启发式 |
 | 9 | 是否存在重要 TODO 未记录 | ✅ §4 列出 P0–P4 |
-| 10 | 是否存在 hardcoded address | ⚠️ **有，但必要**：`src/storage/w25q64.h` 的 `W25Q64_*_BASE/SIZE`（历史区不在 PM 里，必须有个来源）。其余源码中的地址只出现在**注释**里。已记为技术债（建议改用 `PM_*` 宏） |
+| 10 | 是否存在 hardcoded address | ✅ secondary/NVS/history 基址均来自 PM 宏；业务自管 history 的 1 MiB 容量仍是显式常量 |
 | 11 | 是否存在 magic number | ⚠️ 有且**必须有**：`IMAGE_MAGIC 0x96F3B83D`、`IH_*_OFF`、`0x27FF0`（trailer）等，均与 MCUboot `bootutil/include/image.h` 对齐，已有注释指明出处 |
 | 12 | 是否存在旧 W25Q64 layout | ✅ 无。当前布局为 secondary `0x0` / NVS `0x28000` / history `0x2E000`；旧版历史从 `0x000000` 起，已在文档中标注为历史 |
 | 13 | 是否存在旧内部 NVS 地址 | ✅ 无。`git grep -E "NVS_PARTITION_SIZE"` 为空 |
 | 14 | private key 路径硬编码 | ✅ 已清除 |
 | 15 | 真实 secret | ✅ 无（见 §9） |
-| 16 | 两端 OTA auth key 是否一致 | ✅ 一致 —— 固件 `src/ble/ota_auth_key.h` 与 App `source/ota.properties` 都是 `50 61 6E 64 61 54 65 6D 70 4F 54 41 32 30 32 36`。**两者都不在仓库里，换密钥时必须同时改这两处 + 主机脚本** |
+| 16 | 两端 OTA auth key 是否一致 | ✅ 本地忽略文件已逐字节比对一致；值不写入文档或仓库。换密钥时必须同时改两端与主机脚本 |
 | 17 | MCUboot public key 与 signing key 流程是否一致 | ✅ 公钥由构建期从同一把 PEM 提取并编进 MCUboot；已用 `imgtool verify` 正/负向验证 |
 | 18 | OTA 使用的 binary 是否真的是 signed image | ✅ `imgtool verify` 通过；且设备端曾用坏签名镜像反证 MCUboot 确实拒绝 |
 | 19 | history storage 是否可能覆盖 secondary / NVS | ✅ 不会。三层保证（分区 API 边界 + 容量预检 + OTA 期间暂停写历史），且三段地址无重叠（门禁 H 项 PASS） |
@@ -469,9 +467,9 @@ App 工程根目录 = 仓库根的 `source/`（Gradle 工程在 `source/`，不�
 | 2 | Android 极值长度与 `BATTERY_CHAR` | 注释长度错误，且 UUID 与历史信息冲突 | 注释已修正，冲突别名与空实现已删除 |
 | 3 | 固件 `12340010` 声明 | 声明成服务但从未注册 | 声明已删除；`12340011` 仍在配置服务内 |
 | 4 | `pm_static.yml` 显式 `external_flash` | 与 NVS 重叠 | 显式条目已删除；PM 自动剩余区从 `0x2E000` 开始 |
-| 6 | 实时帧 vs 历史记录的气压单位 | — | 实时帧 = **0.1 hPa**；历史记录 = **Pa** | 属**协议事实**，不能悄悄统一（会破坏兼容）。已在 `PROTOCOL.md` §4 明确警示 |
-| 7 | 旧文档（本任务前的交接/说明文档） | `OTA_AUTH_KEY` 写在 `ble_ota.h`、构建脚本默认使用本机私钥路径 | 均已外置/移除 | 已在本套文档中标注为「历史方案（已废弃）」 |
-| 9 | `CLAUDE.md`（工程指令文件） | `E104-BT5010A 194KB FLASH 24K RAM`、`W25Q64 SLK 30` | 实际 **192 KiB Flash / 24 KiB RAM**；引脚名是 **SCK** | **已修正**（同类错误也在 `docs/2026-1-30优化方案.md`、`docs/GPIO引脚定义.md` 一并修正） |
+| 5 | 实时帧 vs 历史记录的气压单位 | — | 实时帧 = **0.1 hPa**；历史记录 = **Pa** | 属**协议事实**，不能悄悄统一（会破坏兼容）。已在 `PROTOCOL.md` §4 明确警示 |
+| 6 | 旧文档（本任务前的交接/说明文档） | `OTA_AUTH_KEY` 写在 `ble_ota.h`、构建脚本默认使用本机私钥路径 | 均已外置/移除 | 已在本套文档中标注为「历史方案（已废弃）」 |
+| 7 | `CLAUDE.md`（工程指令文件） | `E104-BT5010A 194KB FLASH 24K RAM`、`W25Q64 SLK 30` | 实际 **192 KiB Flash / 24 KiB RAM**；引脚名是 **SCK** | **已修正**（同类错误也在 `docs/2026-1-30优化方案.md`、`docs/GPIO引脚定义.md` 一并修正） |
 
 ---
 

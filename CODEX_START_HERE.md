@@ -58,7 +58,7 @@ App 版本：`versionCode 1` / `versionName "1.0"`（**与固件版本无对应�
 记录周期 60.1 s、事件限流、**OTA 完整闭环**（含断点续传、错误密钥/超容量拒绝、
 MCUboot 拒绝坏签名）、电池电压端到端、全路径栈高水位。
 
-**本批交接改动也已真机验证**（2026-09-14，两轮连续 OTA，判据 = 主槽 `img_size`）：
+**2026-09-14 交接批次已真机验证**（两轮连续 OTA，判据 = 主槽 `img_size`）：
 
 | 轮次 | 推送镜像 | 主槽 `ih_img_size` | 结果 |
 |---|---|---|---|
@@ -161,7 +161,7 @@ Android → BLE（服务 12340050，Control/Data/Status 三特征）
 
 ## Current Next Task
 
-**P0（已✅完成）：本批交接改动已按 `构建 → size/release gate → 真机 OTA 回归 → 提交 → push`
+**P0（已✅完成）：2026-09-14 交接批次已按 `构建 → size/release gate → 真机 OTA 回归 → 提交 → push`
 的顺序落地，两轮真机 OTA 全部通过（证据见上方 Current Status）。**
 
 **下一步是 P1：验证「VDD 是否等于电池电压」。**

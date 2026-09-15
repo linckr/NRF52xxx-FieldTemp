@@ -1,7 +1,7 @@
 # DEVELOPMENT.md — 开发环境与构建
 
 > 版本号全部从**当前实际安装/配置**读取（NCS 版本文件、`libs.versions.toml`、
-> `gradle-wrapper.properties`、`build-pub/*/zephyr/.config` 等），不是凭记忆填写。
+> `gradle-wrapper.properties`、`<sysbuild>/*/zephyr/.config` 等），不是凭记忆填写。
 
 ---
 
@@ -28,7 +28,7 @@
 |---|---|
 | `prj.conf` | App 的 Kconfig（**每个符号只能出现一次**，重复赋值会让文档与实际不一致） |
 | `app.overlay` | **板级引脚与 W25Q64/ADC 定义的实际生效处**（见 `HARDWARE.md` §2） |
-| `boards/nrf52810dk_nrf52810_cpuapp.overlay` | ⚠️ **不生效**的死文件，见 `HARDWARE.md` §2 |
+| `boards/` | 当前没有生效的 board-specific overlay；唯一生效入口是 `app.overlay` |
 | `sysbuild.conf` | sysbuild 级配置：MCUboot / overwrite-only / 外置次级槽 / ECDSA-P256 |
 | `sysbuild/mcuboot.conf` | MCUboot 自身的 Kconfig（SPI NOR、布局页 4096、RC 32k、关日志） |
 | `sysbuild/mcuboot.overlay` | MCUboot 的 devicetree（**与 App 独立，改引脚要同步改**） |
