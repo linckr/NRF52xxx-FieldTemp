@@ -101,6 +101,36 @@ cd C:\Users\linckr\Documents\Codex\2026-09-08\referenced-chatgpt-conversation-th
 .\gradlew.bat :app:assembleDebug --console=plain
 ```
 
+### Windows 工作站已知问题（2026-09-15 已验证）
+
+**Firmware Git 显式 Deny ACL**
+
+- 症状：工作树文件可编辑，但 Git 创建 `.git/index.lock` 时返回 `Permission denied`；
+  `Get-Acl .git` 能看到旧沙箱 SID 的显式 `Deny` ACE。
+- 根因：Codex 受限沙箱在工作区外访问仓库时留下或重新注入隔离 ACL，不是仓库对象损坏。
+- 修复原则：用正常 Windows 用户权限，只移除已核对的旧 SID `Deny` 规则；不要对整个 `.git`
+  执行 `icacls /reset`。写入探针通过后，先确认工作树与 `origin/main` 内容一致，再更新 HEAD / index
+  和分支跟踪关系。
+- 本次结果：`C:\Users\linckr\NRF52xxx-FieldTemp` 已对齐 `origin/main`，`main` 正确跟踪
+  `origin/main`，工作区 clean，目标 `Deny` ACE 为 0。
+- 防止复发：在 Codex 中把 Firmware 仓库本身作为可写 workspace root 打开；否则 Git 操作应在正常
+  用户权限下执行。受限沙箱再次访问工作区外的 `.git`，可能重新注入隔离 ACL。
+
+**Android Gradle / Java ZipFS `AccessDeniedException`**
+
+- 症状：Kotlin/KSP 可以完成，但 `compileDebugJavaWithJavac` 在关闭 Gradle transform JAR 时抛
+  `java.nio.file.AccessDeniedException` / `GeneratedClassCompilationException`。
+- 根因：Codex 受限沙箱与 Java ZipFS 的文件访问冲突；复制 JDK、Gradle distribution 或缓存到新目录
+  不能解决。该错误不表示源码、JAR 或 Gradle 缓存损坏。
+- 处理：使用上面的 JDK 17，在正常 Windows 用户权限下运行：
+
+```powershell
+.\gradlew.bat clean testDebugUnitTest assembleDebug --no-daemon --console=plain
+```
+
+- 本次验证：`BUILD SUCCESSFUL`，47 个任务完成；14 个测试套件、97 项测试全部通过，
+  0 failure / 0 error / 0 skipped；`app-debug.apk` 成功生成。现有 deprecated API 警告不影响构建。
+
 ---
 
 ## Flash
