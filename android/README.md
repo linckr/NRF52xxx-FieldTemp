@@ -1,8 +1,8 @@
 # Android 客户端
 
-本目录为Gradle根目录，在统一仓库中位于android/，同步到独立Android上游时位于source/。当前开发以统一项目为准，不在两份副本各自开发；交付不包含Git历史、产物、手机数据库或真实凭据。
+统一仓库的android/与独立Android仓库的source/均为Gradle根目录；本README在独立仓库位于仓库根目录。当前开发以统一项目为准，不在两份副本各自开发；交付不包含Git历史、产物、手机数据库或真实凭据。
 
-当前App **1.1.2 / versionCode4**，Room11。使用JDK17和本机Android SDK，在本目录执行 `gradlew.bat testDebugUnitTest assembleDebug`；SDK通过ANDROID_HOME或忽略的local.properties设置。OTA/签名凭据只在本机注入，生产配置通过PANDA_RELEASE_KEYSTORE_PROPERTIES读取仓库外文件，模板不是实际凭据。
+当前App **1.1.2 / versionCode4**，Room11。使用JDK17和本机Android SDK，在上述Gradle根目录执行 `gradlew.bat testDebugUnitTest assembleDebug`；SDK通过ANDROID_HOME或忽略的local.properties设置。OTA/签名凭据只在本机注入，生产配置通过PANDA_RELEASE_KEYSTORE_PROPERTIES读取仓库外文件，模板不是实际凭据。
 
 接手与真机记录见本目录[HANDOFF.md](HANDOFF.md)。公共架构和协议以[CODEX_START_HERE.md](https://github.com/linckr/NRF52xxx-FieldTemp/blob/main/CODEX_START_HERE.md)与[PROTOCOL.md](https://github.com/linckr/NRF52xxx-FieldTemp/blob/main/PROTOCOL.md)为准；这些链接兼容统一android/与独立source/布局。
 
