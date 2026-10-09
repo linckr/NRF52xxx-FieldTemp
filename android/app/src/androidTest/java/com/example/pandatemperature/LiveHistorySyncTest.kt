@@ -59,16 +59,17 @@ class LiveHistorySyncTest {
         val address = requireNotNull(vm.deviceAddress.value)
         val dao = AppDatabase.getDatabase(context).temperatureRecordDao()
         val baseline = dao.getAllRecordsSync(address)
-        val gpsBefore = baseline.filter { it.latitude != null || it.longitude != null }.associateBy { it.id }
-        val moduleBefore = baseline.filter { it.latitude == null && it.longitude == null }.associateBy { it.timestamp }
-        assertTrue("Requires the existing 30k history", moduleBefore.size >= 30_000)
+        val gpsBefore = baseline.filter { it.isPhoneSample || it.latitude != null || it.longitude != null }.associateBy { it.id }
+        val moduleBefore = baseline.filter { !it.isPhoneSample && it.latitude == null && it.longitude == null }.associateBy { it.timestamp }
+        val expectedMinimum = InstrumentationRegistry.getArguments().getString("expectedMinimumRecords")?.toInt() ?: 100
+        assertTrue("Not enough existing history for requested validation", moduleBefore.size >= expectedMinimum)
 
         suspend fun checkDatabase(label: String) {
             val rows = dao.getAllRecordsSync(address)
-            val module = rows.filter { it.latitude == null && it.longitude == null }
+            val module = rows.filter { !it.isPhoneSample && it.latitude == null && it.longitude == null }
             assertEquals("$label duplicate history", module.size, module.map { it.timestamp }.distinct().size)
-            val gpsAfter = rows.filter { it.latitude != null || it.longitude != null }.associateBy { it.id }
-            assertTrue("$label must preserve existing GPS rows", gpsBefore.all { (id, row) -> gpsAfter[id] == row })
+            val gpsAfter = rows.filter { it.isPhoneSample || it.latitude != null || it.longitude != null }.associateBy { it.id }
+            assertTrue("$label must preserve existing phone rows, including no-GPS samples", gpsBefore.all { (id, row) -> gpsAfter[id] == row })
             val afterByTime = module.associateBy { it.timestamp }
             assertTrue("$label must preserve original module row IDs",
                 moduleBefore.all { (time, row) -> afterByTime[time]?.id == row.id })

@@ -18,6 +18,7 @@ import com.example.pandatemperature.data.model.HistoryProgress
 import com.example.pandatemperature.data.device.model.DeviceTypes
 import com.example.pandatemperature.data.device.model.resolveDisplayedBatteryVoltage
 import com.example.pandatemperature.data.device.profile.DeviceProfileFactory
+import com.example.pandatemperature.data.device.parser.RetentionRequestBuilder
 import com.example.pandatemperature.data.device.profile.thermometer.ThermometerProfile
 import com.example.pandatemperature.data.device.parser.*
 import kotlinx.coroutines.flow.Flow
@@ -238,6 +239,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // 历史数据获取状态
     private val _isFetchingHistory = MutableStateFlow(false)
     val isFetchingHistory: StateFlow<Boolean> = _isFetchingHistory.asStateFlow()
+    private var isMaintainingHistory = false
     
     // 任务状态（用于显示连接后的任务进度）
     private val _taskStatus = MutableStateFlow<TaskStatus?>(null)
@@ -664,9 +666,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 
                 // ⭐ 根据固件版本创建设备配置
                 currentDeviceProfile = DeviceProfileFactory.createThermometerProfile(
-                    firmwareVersion = firmwareVersion
+                    firmwareVersion = firmwareVersion,
+                    capabilityFlags = _deviceStatus.value?.capabilityFlags ?: 0
                 )
-                val profileType = if (currentDeviceProfile?.usesCombinedRealtimeData == true) "V2(新固件)" else "V1(老固件)"
+                val profileType = when {
+                    _deviceStatus.value?.supportsHistoryVoltage == true -> "V3(含电压历史)"
+                    currentDeviceProfile?.usesCombinedRealtimeData == true -> "V2(新固件)"
+                    else -> "V1(老固件)"
+                }
                 addLog("已选择设备配置: $profileType", LogType.INFO)
                 kotlinx.coroutines.delay(200)
                 
@@ -1633,7 +1640,95 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * @param lastTimestamp 用于本次请求的起始时间戳；0 表示由内部根据本地数据库决定（无数据发 0，有数据发 DB 最新）
      * @param forceFullSync true 时强制发 0，拉取设备全部历史（用于增量失败后的全量重试）
      */
+    /** Shares the history-maintenance lock; callers must release it in finally. */
+    suspend fun beginExclusiveOta(): Boolean = withContext(Dispatchers.Main) {
+        if (isMaintainingHistory || _isFetchingHistory.value || historyFinishJob?.isActive == true ||
+            _deviceStatus.value?.isDataClearInProgress == true ||
+            connectionState.value != BleManager.ConnectionState.ServicesDiscovered) return@withContext false
+        isMaintainingHistory = true
+        try {
+            if (setRealtimeDataNotification(false)) true else {
+                setRealtimeDataNotification(true)
+                isMaintainingHistory = false
+                false
+            }
+        } catch (error: Exception) {
+            isMaintainingHistory = false
+            throw error
+        }
+    }
+
+    suspend fun endExclusiveOta() = withContext(Dispatchers.Main) {
+        try {
+            if (connectionState.value == BleManager.ConnectionState.ServicesDiscovered) {
+                setRealtimeDataNotification(true)
+            }
+        } finally {
+            isMaintainingHistory = false
+        }
+    }
+
+    /** Explicit module maintenance only. Does not delete or replace the App database. */
+    suspend fun retainLatestDeviceHistory(count: Int): Boolean = withContext(Dispatchers.Main) {
+        val request = RetentionRequestBuilder.build(_deviceStatus.value?.capabilityFlags ?: 0, count)
+        if (request == null) {
+            addLog("设备未声明历史保留能力，未发送维护命令", LogType.ERROR)
+            return@withContext false
+        }
+        if (isMaintainingHistory || _isFetchingHistory.value || historyFinishJob?.isActive == true ||
+            _deviceStatus.value?.isDataClearInProgress == true ||
+            connectionState.value != BleManager.ConnectionState.ServicesDiscovered ||
+            !bleManager.isCharacteristicAvailable(BleConstants.HISTORY_CHAR) ||
+            !bleManager.isCharacteristicAvailable(BleConstants.HISTORY_INFO_CHAR) ||
+            !bleManager.isCharacteristicAvailable(BleConstants.STATUS_CHAR)) {
+            addLog("历史任务忙碌或设备未就绪，未发送维护命令", LogType.ERROR)
+            return@withContext false
+        }
+        isMaintainingHistory = true
+        try {
+            val written = CompletableDeferred<Boolean>()
+            bleManager.writeCharacteristic(BleConstants.HISTORY_CHAR, request, onWrite = { written.complete(it) })
+            if (withTimeoutOrNull(BLE_WRITE_TIMEOUT_MS) { written.await() } != true) {
+                addLog("历史保留命令未确认", LogType.ERROR)
+                return@withContext false
+            }
+            val confirmed = withTimeoutOrNull(120_000L) {
+                while (connectionState.value == BleManager.ConnectionState.ServicesDiscovered) {
+                    val info = CompletableDeferred<ByteArray?>()
+                    bleManager.readCharacteristic(BleConstants.HISTORY_INFO_CHAR) { info.complete(it) }
+                    val data = withTimeoutOrNull(BLE_WRITE_TIMEOUT_MS) { info.await() }
+                    if (data != null && data.size >= 8) {
+                        val total = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN).int.toLong() and 0xFFFFFFFFL
+                        _historyTotalRecords.value = total
+                        if (total == count.toLong()) {
+                            val statusRead = CompletableDeferred<ByteArray?>()
+                            bleManager.readCharacteristic(BleConstants.STATUS_CHAR) { statusRead.complete(it) }
+                            val statusData = withTimeoutOrNull(BLE_WRITE_TIMEOUT_MS) { statusRead.await() }
+                            val status = statusData?.let { DeviceStatusParser().parse(it) }
+                            if (status != null) {
+                                _deviceStatus.value = status
+                                if (!status.isDataClearInProgress && status.recordCount == count) {
+                                    return@withTimeoutOrNull true
+                                }
+                            }
+                        }
+                    }
+                    kotlinx.coroutines.delay(500)
+                }
+                false
+            } == true
+            addLog(if (confirmed) "设备已确认保留最新 $count 条历史" else "历史保留结果未确认", if (confirmed) LogType.SUCCESS else LogType.ERROR)
+            confirmed
+        } finally {
+            isMaintainingHistory = false
+        }
+    }
+
     fun fetchHistory(lastTimestamp: Long = 0, forceFullSync: Boolean = false) {
+        if (isMaintainingHistory) {
+            addLog("历史维护正在执行，请稍后同步", LogType.INFO)
+            return
+        }
         if (!bleManager.isCharacteristicAvailable(BleConstants.HISTORY_CHAR)) {
             addLog("设备不支持历史数据功能（HISTORY_CHAR 特征不可用）", LogType.ERROR)
             return
@@ -1860,10 +1955,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     isHistorySubscribed = false
                 }
                 
-                // ⭐ 第三步：写入时间戳（4字节，小端序）
-                val buffer = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN)
-                buffer.putInt(timestamp.toInt())
-                val timestampBytes = buffer.array()
+                // Profile pairs the parser with its explicit request: V3 adds 0x03.
+                val timestampBytes = currentDeviceProfile?.buildHistoryRequest(timestamp)
+                    ?: run {
+                        addLog("设备配置未就绪，停止获取历史数据", LogType.ERROR)
+                        finishHistoryFetch(fetchSession)
+                        return@launch
+                    }
                 
                 // 使用 CompletableDeferred 等待写入完成
                 val writeDeferred = CompletableDeferred<Boolean>()
@@ -2202,7 +2300,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 saveHistoryToDatabase(clearAfterSave = true)
                 currentCoroutineContext().ensureActive()
                 if (!historySession.owns(fetchSession)) return@launch
-                // ⭐ 历史同步完成后立刻写一笔当前实时数据（带 GPS），衔接时间线
+                // ⭐ 历史同步完成后写一笔明确标记来源的手机实时数据（GPS可缺失），衔接时间线
                 val location = if (_hasLocationPermission.value) {
                     locationManager.getCachedLocation() ?: locationManager.getCurrentLocation(5000)
                 } else null
@@ -2653,7 +2751,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 batteryVoltage = _batteryVoltage.value,
                 deviceId = deviceAddress,
                 latitude = location?.latitude,
-                longitude = location?.longitude
+                longitude = location?.longitude,
+                isPhoneSample = true
             )
             
             // 写入数据库

@@ -33,7 +33,7 @@
 | `sysbuild/mcuboot.conf` | MCUboot 自身的 Kconfig（SPI NOR、布局页 4096、RC 32k、关日志） |
 | `sysbuild/mcuboot.overlay` | MCUboot 的 devicetree（**与 App 独立，改引脚要同步改**） |
 | `pm_static.yml` | Partition Manager 静态布局（**唯一编辑入口**） |
-| `VERSION` | **镜像版本号唯一来源**（当前 `1.0.8` + tweak `0`） |
+| `VERSION` | **镜像版本号唯一来源**（当前 `1.0.9` + tweak `0`） |
 | `tools/build_sysbuild.py` | 构建包装（引号安全 + 签名私钥注入），见 §2 |
 
 ### 关键 Kconfig（摘自实际构建）
@@ -84,7 +84,7 @@
 ### 2.0 先把私钥路径设好（PowerShell）
 
 ```powershell
-$env:MCU_BOOT_SIGNING_KEY = "D:\keys\root-ec-p256.pem"
+$env:MCU_BOOT_SIGNING_KEY = "<仓库外的ECDSA-P256私钥路径>"
 ```
 
 > 私钥是**凭据**，**不要**复制进仓库，也不要把路径写死进脚本。
@@ -139,7 +139,7 @@ $env:PYTHONPATH = "C:/ncs/v3.2.1/bootloader/mcuboot/scripts"
 C:\ncs\toolchains\66cdf9b75e\opt\bin\python.exe -m imgtool.main verify `
   --key $env:MCU_BOOT_SIGNING_KEY `
   build-v9\NRF52xxx-FieldTemp\zephyr\zephyr.signed.bin
-# 期望输出：Image was correctly validated / Image version: 1.0.8+0
+# 当前源码构建期望：Image was correctly validated / Image version: 1.0.9+0
 ```
 
 ### 2.5 查看构建产物
@@ -288,7 +288,7 @@ $HEX = "C:\Users\linckr\NRF52xxx-FieldTemp\build-v9\merged.hex"
 | `size_diff.py` | 两个构建的 ROM/RAM 差异对比 |
 | `ota_host_client.py` | PC 侧 BLE OTA 客户端（需要装了 bleak 的解释器） |
 | `ota_mkbadsig.py` | 造"坏签名"镜像（只翻 ECDSA 签名 TLV 1 字节） |
-| `ota_powerloss_reset.py` | 断电专项 |
+| `ota_powerloss_reset.py` | SWD 复位回归，不等同于真实断电 |
 | `w25q64_host_dfu.py` | 主机侧外置 Flash 读写（**有运行扰动**，见 §4.5） |
 | `free_ble.py` | **PC 侧 BLE 测试前必用**：确保手机让出 BLE（`am force-stop` 不够） |
 | `verify_v6_timing.py` | 记录周期与事件限流验证 |
@@ -322,7 +322,7 @@ C:\Users\linckr\.workbuddy\binaries\python\envs\default\Scripts\python.exe tools
 | `targetSdk` | **36** | 同上 |
 | `minSdk` | **26** | 同上 |
 | `applicationId` / `namespace` | `com.example.pandatemperature` | 同上 |
-| `versionCode` / `versionName` | **1 / "1.0"** | 同上（**与固件版本无关**） |
+| `versionCode` / `versionName` | **3 / "1.1.1"** | 同上（**与固件版本无关**） |
 | Java / Kotlin target | 11 | 同上 |
 | 构建变体 | `debug` / `release` | 无 flavor |
 
@@ -466,3 +466,51 @@ Windows 上跑 `tools/ota_host_client.py` / `free_ble.py` 之前：
    （常见"连上立刻掉"，表现为 `start_notify` 抛 Not connected）
    → 必须把 `connect + start_notify + START` 作为**整体**重试。
 5. 客户端脚本要加 `python -u`，否则重定向到文件时看不到进度。
+
+## 2026-10-09 P2构建与生产签名阶段
+
+开发签名 `build-p2-dev` 已完成sysbuild及门禁：Flash151540 B、signed152203 B、RAM23080 B；
+相对v8增加Flash2012 B、RAM128 B，RAM余1496 B；MCUboot仍31876 B，余892 B。
+签名镜像相对primary减6 KiB预留的157696 B红线余5493 B；ECDSA DER长度可能有逐次差异。
+分区与MCUboot配置没有修改，新历史存储码及协议见PROTOCOL §3。
+
+native C测试通过TinyCC编译真实生产函数及实际序列化片段，NOR/NVS替身故障注入为0 failures：
+33000→3000、元数据失败时不擦除、回收中断恢复、跨物理环形边界、撕裂槽、丢失提交应答、
+批量跨扇区和12/14 B传输。入口如下；编译器路径由本机提供，不下载/提交测试二进制：
+
+```powershell
+python tools/test_history_storage.py --cc "<本机native C编译器路径>" --work-dir "<本机临时目录>"
+```
+
+Android119项单测通过，生产签名APK已验签；当前源码versionCode3/versionName1.1.1。
+生产密钥及签名配置全部在仓库外；Android使用PANDA_RELEASE_KEYSTORE_PROPERTIES注入外置配置，
+固件使用MCU_BOOT_SIGNING_KEY或--signing-key。不要把真实文件、路径细节或内容写入Git。
+生产ECDSA公钥必须先通过SWD配置到MCUboot，现有设备只信任原公钥，不能直接OTA换成新签名。
+生产APK验签与设备固件生产信任部署是不同验收项。
+
+已完成开发信任链 1.0.9 升级与主槽逐字节回读、V3 历史回读和硬件精确保留3000条；P3已取得擦除流程、部分写入、END后和暂停搬运流程的真实电池断电恢复证据，但不证明 NOR/NVMC 忙脉冲中断电。保留策略冷启动持久性已验证；realme到小米数据库迁移已完成；尚待小米BLE/raw集合及3000条精简验收与生产信任链部署。 具体证据与耗时见HANDOFF最新阶段记录。
+原始数据已本机留档并确认SWD识别；私人数据库、完整备份及凭据不随提交上传。
+
+### 2026-10-10 状态补充
+
+硬件保留后，realme端已在隔离整根SWD、实际电池断电后完成冷启动验证：archive_sync 23.296 s通过，hardware count=3000、完整回读3000，传感器核心/GPS保护、无未来时间和无重复检查通过。再次独立raw捕获19.434 s通过：3000条V3、42,000 B、真实END、前后8 B HISTORY_INFO稳定。保留策略冷启动持久性已验证。最近一次VDD读数2.765 V来自2026-10-09约18:45，不是2026-10-10当前实时测量，精度仍待万用表对照。
+
+用户已授权将realme历史迁移到小米，不保留小米原有数据。小米test APK已覆盖安装。realme完整数据库已迁移到小米，迁移后的主库SHA与完整源归档一致，App启动成功；保留源模块33,446条、GPS187条及quarantine22,484条，小米原有1,042条GPS已单独本机备份、未并入。此前小米1.1.0 BLE已通过；新版1.1.1来源修复真机回归因AOD尚未开始，详见最新记录。手机3000条精简尚未应用；需先在小米连接当前模块，再取得新的raw历史集合并核对后应用精简。 私人档案路径、手机序列号和数据不写入Git。
+
+签名产物区分：已真机回读匹配的是开发信任链候选152,203 B；当前本地生产release asset为152,202 B。ECDSA DER签名长度可变，不能把生产镜像当成已安装开发候选或声称完整signed文件逐字节一致。资源上界仍按152,203 B记录。生产MCUboot公钥信任尚未部署，生产APK未安装，GitHub Release未发布；两个upstream PR #2在本轮记录时仍OPEN，后续须实时核对。
+
+开发与生产镜像的App payload均为151,540 B，已逐字节一致，SHA256为 `236323e4319f7228ce6b4856bb1736a4bede1cf58e3dfc85239678bdc943494c`；生产App代码与已真机验证的开发payload相同。生产 `imgtool verify` 通过、版本1.0.9；Android生产APK的v2/RSA3072验签通过。这些不代表生产MCUboot公钥已经部署或生产APK已经安装。
+
+### 小米迁移最新状态
+
+小米test APK已覆盖安装。realme完整数据库已迁移到小米，迁移后的主库SHA与完整源归档一致，App启动成功；保留源模块33,446条、GPS187条及quarantine22,484条，小米原有1,042条GPS已单独本机备份、未并入。此前小米1.1.0 BLE已通过；新版1.1.1来源修复真机回归因AOD尚未开始，详见最新记录。手机3000条精简尚未应用；需先在小米连接当前模块，再取得新的raw历史集合并核对后应用精简。
+
+### 2026-10-10 App 1.1.1 来源隔离修复（精简尚未执行）
+
+当前App源码为versionCode3 / versionName1.1.1，Room数据库版本11。新增 `TemperatureRecord.isPhoneSample`（SQL INTEGER NOT NULL DEFAULT 0）：手机实时落盘始终标记为true，即使无GPS；硬件历史upsert、增量起点和计数只处理false且无坐标的记录。10→11迁移无损增加字段，并将已有GPS行标为phone；旧无GPS行无法确定来源，保守默认false继续兼容历史候选，后续须在完整归档保护下按精确硬件raw集合过滤，不能凭年份/无GPS批量猜测删除。
+
+定位到一条旧无GPS手机实时行与硬件历史传感器核心不同，严格保护断言已阻止3000条精简，数据库精简尚未应用。修复保留严格核心数值一致性断言，不通过放宽精度掩盖差异；第一次同步可能更新该旧行并触发保护失败，须核对差异已消除后再做稳定重复回归。
+
+构建证据：119项单元测试0失败，Release lint/build通过，1.1.1生产APK v2/RSA3072验签通过且证书未变。小米8项isolated Room测试（7项DAO、1项真实SQLite10→Room11迁移）8.478 s通过；覆盖无GPS手机行与历史同timestamp不被upsert覆盖、历史增量/计数排除phone，以及迁移记录/设备/隔离表无损。
+
+此前小米1.1.0真实BLE archive_sync 79.289 s通过，硬件3000/全量3000、核心和GPS保护、无重复/未来时间、cap0xFF/v9；迁移主库先与源归档SHA一致。该次同步后模块33,458/GPS187（新来源字段引入前的无GPS分类，不等于确证硬件行数），VM电压2.875 V来自2026-10-10约00:17的观测。升级1.1.1后首轮真实archive_sync因锁屏AOD导致Activity未在30 s内RESUMED而未开始，无FATAL；正在等待用户解锁并置前台。不能把旧版BLE通过当作新版来源修复的真机回归通过。手机3000条精简仍待新版稳定同步、fresh raw集合及最终数据库核对；生产APK未安装、生产固件信任未部署。

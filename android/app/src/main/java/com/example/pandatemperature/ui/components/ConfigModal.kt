@@ -211,9 +211,9 @@ fun ConfigModal(
                     text = buildString {
                         append("实时采样固定 1 秒（用于实时显示与最高最低温度）")
                         if (retentionDays != null) {
-                            append("\n按此间隔约可保留 ")
+                            append("\n按物理容量估算约 ")
                             append(retentionDays)
-                            append(" 天（承诺 30 天）")
+                            append(" 天，实际以设备保留策略为准")
                         }
                     },
                     style = MaterialTheme.typography.bodySmall,

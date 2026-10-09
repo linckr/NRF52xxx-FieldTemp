@@ -140,5 +140,23 @@ class HistoryRecordDaoTest {
         assertEquals(1, dao.getRecordCount("test-device-a"))
         assertEquals(updated.copy(id = originalId), dao.getAllRecordsSync("test-device-a").single())
     }
+    @Test
+    fun phoneSamplesWithoutGpsNeverBecomeModuleHistory() = runBlocking {
+        val module = record(7000)
+        val phone = module.copy(temperature = 31f, isPhoneSample = true)
+        val phoneId = dao.insert(phone)
+        dao.insert(record(9000).copy(isPhoneSample = true))
+        dao.upsertHistoryRecords(listOf(module))
+        dao.upsertHistoryRecords(listOf(module.copy(temperature = 28f)))
+        val rows = dao.getAllRecordsSync("test-device-a")
+        assertEquals(phone.copy(id = phoneId), rows.single { it.id == phoneId })
+        assertEquals(3, rows.size)
+        assertEquals(1, dao.getHistoryRecordCount("test-device-a"))
+        assertEquals(7000L, dao.getLatestRecordWithoutGps("test-device-a")!!.timestamp)
+        assertEquals(28f, dao.getHistoryRecordsByTimestamps("test-device-a", listOf(7000)).single().temperature, 0f)
+        var rejected = false
+        try { dao.upsertHistoryRecords(listOf(phone)) } catch (_: IllegalArgumentException) { rejected = true }
+        org.junit.Assert.assertTrue("Phone source must be rejected as history input", rejected)
+    }
 }
 
