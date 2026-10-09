@@ -356,7 +356,7 @@ sdk.dir=<你的 Android SDK 路径>
 
 ```powershell
 $env:JAVA_HOME   = "C:\Users\linckr\.workbuddy\binaries\jdk\jdk-17.0.20.1+1"
-$SRC = "C:\Users\linckr\Documents\Codex\2026-09-08\referenced-chatgpt-conversation-this-is-an\PandaThemperature-Android\source"
+$SRC = "C:\Users\linckr\NRF52xxx-FieldTemp\android"
 ```
 
 ### 8.1 Debug 构建

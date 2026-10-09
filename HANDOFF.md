@@ -14,7 +14,7 @@
 | Android App 用途 | 设备端配套客户端：BLE 连接与自动重连、实时数据展示、历史同步与曲线、设备配置、固件 OTA 升级界面；另有若干工具箱功能（营地助手、营地回溯、天气模块） |
 | 固件仓库（本地） | `C:\Users\linckr\NRF52xxx-FieldTemp` |
 | 固件仓库（远端） | `https://github.com/linckr/NRF52xxx-FieldTemp`（`upstream` = `https://github.com/yodfz/NRF52xxx-FieldTemp`） |
-| App 仓库（本地） | `C:\Users\linckr\Documents\Codex\2026-09-08\referenced-chatgpt-conversation-this-is-an\PandaThemperature-Android` |
+| App 源码（本地） | `C:\Users\linckr\NRF52xxx-FieldTemp\android`（统一项目）；独立仓库用于上游回传 |
 | App 仓库（远端） | `https://github.com/linckr/PandaThemperature-Android`（`upstream` = `https://github.com/yodfz/PandaThemperature-Android`） |
 | 硬件型号 | 模组 **E104-BT5010A**（亿佰特） |
 | MCU | **nRF52810**（QFAA，Cortex-M4 @ 64 MHz，192 KiB Flash / 24 KiB RAM） |
@@ -62,7 +62,7 @@
 
 | 项 | 说明 |
 |---|---|
-| 电压读数是否等于**电池**电压 | 当前读数 3325~3336 mV、极差仅 11 mV、OTA 重载下也不跌 → 几乎肯定是**调试器供电的稳压 3.3 V**。判定需拔掉调试器供电、让板子跑电池但保留 SWD |
+| 电压读数是否等于**电池**电压 | 9月读数来自疑似调试器供电；10月用户已确认电池供电，手机读数2.989→2.930 V。万用表绝对精度及电池端压对应关系尚未验证 |
 | **手机端** OTA 客户端在固件 `1.0.8+0` 上的真机跑测 | 本批回归用的是**PC 侧** `tools/ota_host_client.py`；App（`f86f670`）的手机端 OTA 流程上一次真机联调是在该提交之前的代码上做的 |
 
 ### 2.4 已部分实现
@@ -84,7 +84,7 @@
 
 ### 2.6 已知 bug
 
-**当前没有已确认的、可复现的功能性 bug。**
+2026-10-09 历史同步、去重和断线重试专项未发现残留可复现问题；本次修复及验证边界见文末和 android/HANDOFF.md。
 
 历史修复记录（避免重复踩坑）：
 
@@ -126,9 +126,9 @@
 | Firmware commit 时间 | 2026-09-14 |
 | Firmware 远端同步 | ✅ 已推送到 `origin/main` |
 | Android branch | `main` |
-| Android commit | **`f86f670`** = 上次真机联调的 App 功能基线；当前 HEAD 用 `git log -1` 查 |
+| Android commit | **`be12069`** = 2026-10-09 历史同步/重连验证，旧 OTA 基线仍为 f86f670 |
 | Android 远端同步 | ✅ 已推送到 `origin/main` |
-| 两侧互相兼容的 commit | 固件 `b97088d` ↔ App `f86f670` 为真机功能基线。2026-09-15 清理仅修正 GATT Status 声明与死别名，UUID、报文及 OTA 命令布局不变；新 HEAD 的真机回归待做 |
+| 两侧互相兼容的 commit | 旧完整功能基线固件 b97088d ↔ App f86f670；10月历史/重连专项为设备 patch=8 ↔ App be12069，未读取设备固件hash，未验证手机OTA |
 | 当前 firmware version | **`1.0.8+0`**（`VERSION` 文件：MAJOR 1 / MINOR 0 / PATCHLEVEL 8 / TWEAK 0） |
 | 当前 Android App version | `versionCode = 1`、`versionName = "1.0"`（**与固件版本无对应关系**） |
 | 当前 BLE protocol version | **当前没有独立的 BLE protocol version** —— 靠状态帧 `byte5` 能力位与帧长做隐式能力判断，见 `PROTOCOL.md` §6 |
@@ -173,8 +173,8 @@
 
 ### P1 — 验证「VDD 是否等于电池电压」
 
-- **要实现什么**：拔掉调试器供电，让板子由电池供电、保留 SWD，读 VDD。
-- **为什么**：当前读数几乎肯定是调试器的稳压 3.3 V。若 VDD ≠ 电池电压，该功能的产品价值为 0（甚至误导用户）。
+- **要实现什么**：在已确认的电池供电状态下，对照万用表电池端压与VDD/App，验证绝对精度及负载压降。
+- **当前进展**：用户已确认电池供电，读数2.989→2.930 V；需万用表对照，不能沿用9月调试器供电推断。
 - **涉及文件**：`src/vdd.c`、`app.overlay` 的 `&adc`；测量用 pyOCD（`-M attach`，不发 reset，直接读 RAM 里的 `g_vdd_mv`，注意连接会 halt）
 - **已有基础**：`vdd_sample_mv()` / `vdd_cached_mv()` / `g_vdd_min_mv` / `g_vdd_max_mv`（诊断用区间统计，见 `src/vdd.h`）
 - **不能破坏**：实时帧长度 8、offset 6 的语义、`0xFFFF` 哨兵、量程 1700~3600 mV
@@ -507,3 +507,15 @@ App 工程根目录 = 仓库根的 `source/`（Gradle 工程在 `source/`，不�
 5. 动 OTA 之前读 `OTA.md`，改协议之前读 `PROTOCOL.md`。
 6. **改动落地顺序固定为：构建 → `size_summary.py` + `release_gate.py` → 真机回归 → 提交 → push。**
    没上过板的改动不要先提交成新基线。
+
+## 2026-10-09 Android 同步修复与统一项目
+
+Android 已合并到本仓库 android/，直接作为 Gradle 根目录。同步来源 commit `be12069abae643085b3ed9773ce1591d462d1e2d`（独立 Android 仓库）；修复源码已在手机验证，固件本轮没有改动或重新烧录。设备状态 patch=8，不能凭版本号证明其二进制等于当前固件 HEAD。
+
+已验证：105 项单元测试，6 项手机 Room 隔离数据库测试、1 项冷启动测试和1项显式真实 BLE 回归；连续两次全量、立即重试、传输中断连重连及增量同步均通过。00:43 有效记录 33,476（模块33,382/GPS94），重复/未来时间为0，原22,484条异常记录仍在用户授权的本机归档。手机数据库/恢复脚本不上传。
+
+旧 APK 的 patch>=3→14B 错判造成2043/2044年；当前历史仍12B，OTA仍 zephyr.signed.bin。修复包含无进展超时、事务提交后清缓冲、按设备/时间戳去重、会话清理互斥/断连取消、GPS进度排除及通知确认超时。冷启动会话必须在init监听前初始化。详见 [Android HANDOFF](android/HANDOFF.md)。
+
+用户已确认电池供电，读数约2.989→2.930 V，下降59 mV；绝对精度、容量/续航和VDD到电池端压对应关系仍需万用表验证。手机OTA完整闭环、断电矩阵、生产签名仍待做。Flash/RAM沿用上次静态结果：App Flash149,528/163,328 B、RAM22,952/24,576 B，MCUboot31,876/32,768 B；本轮未重建固件。
+
+统一项目目录验证：在 android/ 未复制任何本机凭据的情况下，JDK17 + ANDROID_HOME 构建 testDebugUnitTest / assembleDebug 成功（1m20s），105项单测0失败。调试构建OTA默认授权值为空，需开发者按example在本机配置；本轮未重建或烧录固件。
