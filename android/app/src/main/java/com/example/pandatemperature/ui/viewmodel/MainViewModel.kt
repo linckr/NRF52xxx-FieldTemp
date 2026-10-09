@@ -245,6 +245,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _taskStatus = MutableStateFlow<TaskStatus?>(null)
     val taskStatus: StateFlow<TaskStatus?> = _taskStatus.asStateFlow()
     
+    private data class RetainedSync(val session: Long, val deviceId: String, val retryAttempt: Int) {
+        var before: ByteArray? = null
+        var after: ByteArray? = null
+        var requestTimestamp = -1L
+        var endReceived = false
+        var savesSucceeded = true
+        val timestamps = mutableSetOf<Long>()
+    }
+    private var retainedSync: RetainedSync? = null
+    private var historyFetchDeviceId: String? = null
+    private fun retainedHistoryKey(deviceId: String) = "retain_history_3000_$deviceId"
+    internal fun isPersistentHistoryRetentionEnabled(deviceId: String): Boolean =
+        prefs.getBoolean(retainedHistoryKey(deviceId), false)
     private var historyDataList = mutableListOf<TemperatureRecord>()
     private val historyMutex = Mutex()
     private var isHistorySubscribed = false
@@ -700,8 +713,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // 自动同步历史数据（增量获取）
                 setStep("正在同步历史数据")
                 addLog("开始自动同步历史数据...", LogType.INFO)
-                val lastTimestamp = getLastHistoryTimestamp()
-                fetchHistory(lastTimestamp)
+                fetchHistory()
                 
                 // 注意：任务状态会在 finishHistoryFetch() 中清除，这里不需要清除
                 
@@ -1612,13 +1624,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * 获取当前查看设备在「本地数据库」中可作为「设备历史增量起点」的最新时间戳。
      * 只统计无 GPS 的记录（设备同步下来的）；带 GPS 的是手机定时写入的，不能作为向设备请求历史的基准。
-     * @return 该设备最新一条「无 GPS」记录的 timestamp；无此类记录或异常时返回 0（表示应发 0 拉全量）
+     * @return 该设备最新一条模块历史（排除手机采样）的 timestamp；无此类记录或异常时返回 0（表示应发 0 拉全量）
      */
 
-    private suspend fun getLastHistoryTimestamp(): Long {
+    private suspend fun getLastHistoryTimestamp(deviceId: String): Long {
         return withContext(Dispatchers.IO) {
             try {
-                val deviceId = _viewingDeviceAddress.value ?: return@withContext 0L
                 val latestFromDevice = recordDao.getLatestRecordWithoutGps(deviceId)
                 val latestTimestamp = latestFromDevice?.timestamp
                 val resumeTimestamp = historyResumeTimestamp(latestTimestamp, System.currentTimeMillis() / 1000)
@@ -1670,6 +1681,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Explicit module maintenance only. Does not delete or replace the App database. */
     suspend fun retainLatestDeviceHistory(count: Int): Boolean = withContext(Dispatchers.Main) {
+        val commandDeviceId = deviceAddress.value ?: return@withContext false
         val request = RetentionRequestBuilder.build(_deviceStatus.value?.capabilityFlags ?: 0, count)
         if (request == null) {
             addLog("设备未声明历史保留能力，未发送维护命令", LogType.ERROR)
@@ -1718,13 +1730,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 false
             } == true
             addLog(if (confirmed) "设备已确认保留最新 $count 条历史" else "历史保留结果未确认", if (confirmed) LogType.SUCCESS else LogType.ERROR)
+            if (confirmed && count == 3000) {
+                if (deviceAddress.value != commandDeviceId) return@withContext false
+                val persisted = withContext(Dispatchers.IO) {
+                    prefs.edit().putBoolean(retainedHistoryKey(commandDeviceId), true).commit()
+                }
+                if (!persisted) {
+                    addLog("设备保留已确认，但本地持续策略未持久化", LogType.ERROR)
+                    return@withContext false
+                }
+            }
             confirmed
         } finally {
             isMaintainingHistory = false
         }
     }
 
-    fun fetchHistory(lastTimestamp: Long = 0, forceFullSync: Boolean = false) {
+    fun fetchHistory(lastTimestamp: Long = 0, forceFullSync: Boolean = false, retentionRetryAttempt: Int = 0) {
         if (isMaintainingHistory) {
             addLog("历史维护正在执行，请稍后同步", LogType.INFO)
             return
@@ -1733,12 +1755,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             addLog("设备不支持历史数据功能（HISTORY_CHAR 特征不可用）", LogType.ERROR)
             return
         }
+        val sessionDeviceId = deviceAddress.value ?: run {
+            addLog("设备尚未连接，未开始历史同步", LogType.ERROR)
+            return
+        }
         val fetchSession = historySession.begin()
         if (fetchSession == null) {
             addLog("历史数据正在获取中，请勿重复点击", LogType.INFO)
             return
         }
         
+        historyFetchDeviceId = sessionDeviceId
+        retainedSync = if (_deviceStatus.value?.supportsHistoryRetention == true &&
+            isPersistentHistoryRetentionEnabled(sessionDeviceId)) {
+            RetainedSync(fetchSession, sessionDeviceId, retentionRetryAttempt)
+        } else null
         _isFetchingHistory.value = true
         historyFetchJob = viewModelScope.launch {
             try {
@@ -1767,7 +1798,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 
                 // 只计模块历史；手机 GPS 记录不得进入设备同步进度
                 val dbCount = withContext(Dispatchers.IO) {
-                    val deviceId = _viewingDeviceAddress.value ?: return@withContext 0
+                    val deviceId = sessionDeviceId
                     recordDao.getHistoryRecordCount(deviceId)
                 }
 
@@ -1775,9 +1806,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // 确定发给设备的起始时间戳（仅允许 0 或「该设备 DB 最新一条」）
                 // 全新安装/无本地数据 → 必须发 0 拉全量；有数据 → 发 DB 最新做增量；强制全量重试 → 发 0
                 var timestamp = when {
-                    forceFullSync -> 0L
+                    retainedSync?.session == fetchSession || forceFullSync -> 0L
                     lastTimestamp > 0 -> lastTimestamp
-                    else -> getLastHistoryTimestamp()
+                    else -> getLastHistoryTimestamp(sessionDeviceId)
                 }
                 if (!historySession.acceptsPackets(fetchSession)) return@launch
                 // 防御：该设备本地记录数为 0 时一律发 0（避免竞态/备份恢复等导致误用增量）
@@ -1811,6 +1842,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 
                 // 记录请求的时间戳
                 lastRequestedTimestamp = timestamp
+                retainedSync?.takeIf { it.session == fetchSession }?.requestTimestamp = timestamp
                 
                 // ⭐ 设置任务状态：正在同步历史数据
                 _taskStatus.value = TaskStatus("正在同步历史数据", 0, 0)
@@ -1829,6 +1861,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         if (!historySession.acceptsPackets(fetchSession)) return@readCharacteristic
                         try {
                             if (data != null && data.size >= 8) {
+                                retainedSync?.takeIf { it.session == fetchSession }?.before = data.copyOf()
                                 val infoBuffer = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
                                 val total = infoBuffer.int.toLong() and 0xFFFFFFFFL
                                 val startSector = infoBuffer.short.toInt() and 0xFFFF
@@ -2135,6 +2168,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         try {
             // 检查结束标志
             if (data.size == 1 && data[0] == BleConstants.HISTORY_END_FLAG) {
+                val retained = retainedSync?.takeIf { it.session == fetchSession }
+                if (retained != null) {
+                    retained.endReceived = true
+                    val pendingInfo = CompletableDeferred<ByteArray?>()
+                    bleManager.readCharacteristic(BleConstants.HISTORY_INFO_CHAR) { pendingInfo.complete(it?.copyOf()) }
+                    retained.after = withTimeoutOrNull(BLE_READ_TIMEOUT_MS) { pendingInfo.await() }
+                }
                 val total = expectedHistoryTotal
                 val received = totalHistoryReceivedCount
                 
@@ -2176,8 +2216,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             
             // 使用解析器解析数据包
-            // ⭐ 修复：使用 _viewingDeviceAddress 确保与数据库查询使用一致的设备地址
-            val deviceId = _viewingDeviceAddress.value ?: ""
+            // 使用本次同步捕获的连接设备，避免查看其他设备时串写记录。
+            val deviceId = historyFetchDeviceId ?: return
+            if (deviceAddress.value != deviceId) {
+                retainedSync?.takeIf { it.session == fetchSession }?.savesSucceeded = false
+                return
+            }
             val parser = currentDeviceProfile?.getHistoryParser(deviceId) ?: run {
                 addLog("历史数据解析失败：当前设备配置尚未就绪", LogType.ERROR)
                 return
@@ -2194,7 +2238,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val newRecords = parser.parse(data)
             
             if (newRecords.isNullOrEmpty()) return
+            if (newRecords.any { it.deviceId != deviceId }) {
+                retainedSync?.takeIf { it.session == fetchSession }?.savesSucceeded = false
+                return
+            }
             
+            if (!historySession.acceptsPackets(fetchSession)) return
+            retainedSync?.takeIf { it.session == fetchSession }?.timestamps?.addAll(newRecords.map { it.timestamp })
             var currentBufferSize = 0
             historyMutex.withLock {
                 historyDataList.addAll(newRecords)
@@ -2286,8 +2336,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         retryFullSync: Boolean = false
     ) {
         if (!historySession.beginFinish(fetchSession)) return
+        val retainedAtFinish = retainedSync?.takeIf { it.session == fetchSession }
         historyFinishJob = viewModelScope.launch {
             // ⭐ 根据 Profile 配置选择同步/异步方法（提前获取，供 try 和 catch 使用）
+            var retryRetained = false
             val useAsyncNotification = currentDeviceProfile?.useAsyncNotificationForHistory ?: false
             
             try {
@@ -2300,6 +2352,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 saveHistoryToDatabase(clearAfterSave = true)
                 currentCoroutineContext().ensureActive()
                 if (!historySession.owns(fetchSession)) return@launch
+                val retained = retainedAtFinish
+                if (retained != null) {
+                    val eligible = HistoryRetentionGate.canTrim(retained.requestTimestamp, retained.endReceived,
+                        recordsReceivedInSession, retained.timestamps, retained.before, retained.after,
+                        retained.savesSucceeded, historySession.owns(fetchSession) &&
+                            deviceAddress.value == retained.deviceId &&
+                            connectionState.value == BleManager.ConnectionState.ServicesDiscovered)
+                    if (eligible) {
+                        withContext(Dispatchers.IO) {
+                            currentCoroutineContext().ensureActive()
+                            if (historySession.owns(fetchSession) && deviceAddress.value == retained.deviceId) {
+                                val removed = recordDao.trimHistoryToWireSet(retained.deviceId, retained.timestamps.toSet()) {
+                                    historySession.owns(fetchSession) && deviceAddress.value == retained.deviceId &&
+                                        connectionState.value == BleManager.ConnectionState.ServicesDiscovered
+                                }
+                                addLog("本地持续保留已核对3000条，移除${removed}条窗口外模块历史", LogType.SUCCESS)
+                            }
+                        }
+                    } else {
+                        addLog("保留窗口未通过完整END/3000唯一记录/稳定信息/保存验证，本地记录未删除", LogType.ERROR)
+                        retryRetained = retained.retryAttempt == 0
+                    }
+                }
                 // ⭐ 历史同步完成后写一笔明确标记来源的手机实时数据（GPS可缺失），衔接时间线
                 val location = if (_hasLocationPermission.value) {
                     locationManager.getCachedLocation() ?: locationManager.getCurrentLocation(5000)
@@ -2413,7 +2488,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 if (historySession.complete(fetchSession)) {
                     _isFetchingHistory.value = false
-                    if (retryFullSync) fetchHistory(forceFullSync = true)
+                    if (retainedAtFinish != null) {
+                        if ((retryFullSync || retryRetained) && retainedAtFinish.retryAttempt < 1) {
+                            fetchHistory(forceFullSync = true, retentionRetryAttempt = retainedAtFinish.retryAttempt + 1)
+                        }
+                    } else if (retryFullSync) fetchHistory(forceFullSync = true)
                 }
             }
         }
@@ -2435,6 +2514,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
+            retainedSync?.savesSucceeded = false
             addLog("保存历史数据到数据库失败: ${e.message}", LogType.ERROR)
         }
     }

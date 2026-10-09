@@ -158,5 +158,52 @@ class HistoryRecordDaoTest {
         try { dao.upsertHistoryRecords(listOf(phone)) } catch (_: IllegalArgumentException) { rejected = true }
         org.junit.Assert.assertTrue("Phone source must be rejected as history input", rejected)
     }
+    @Test
+    fun authoritativeWireSetRemovesCachedExtrasButPreservesAllOtherSources() = runBlocking {
+        val wire = (10_000L until 13_000L).toSet()
+        dao.upsertHistoryRecords(wire.map { record(it) })
+        // These 164 cache rows are newer by timestamp: sorting take3000 would keep the wrong set.
+        dao.upsertHistoryRecords((90_000L until 90_164L).map { record(it) })
+        val phone = record(10_001).copy(isPhoneSample = true)
+        val gps = record(10_002).copy(latitude = 1.0) // Legacy GPS stays protected even without marker.
+        val phoneId=dao.insert(phone); val gpsId=dao.insert(gps)
+        dao.upsertHistoryRecords(listOf(record(99_000,"test-device-b")))
+        database.openHelper.writableDatabase.execSQL("CREATE TABLE isolated_metadata (id INTEGER PRIMARY KEY, value TEXT)")
+        database.openHelper.writableDatabase.execSQL("INSERT INTO isolated_metadata VALUES (1,'quarantine-preserved')")
+        assertEquals(164,dao.trimHistoryToWireSet("test-device-a",wire))
+        assertEquals(3000,dao.getHistoryRecordCount("test-device-a"))
+        val after=dao.getAllRecordsSync("test-device-a")
+        assertEquals(wire,after.filter { !it.isPhoneSample && it.latitude==null && it.longitude==null }.map { it.timestamp }.toSet())
+        assertEquals(phone.copy(id=phoneId),after.single { it.id==phoneId })
+        assertEquals(gps.copy(id=gpsId),after.single { it.id==gpsId })
+        assertEquals(1,dao.getHistoryRecordCount("test-device-b"))
+        database.openHelper.writableDatabase.query("SELECT value FROM isolated_metadata").use {
+            org.junit.Assert.assertTrue(it.moveToFirst());assertEquals("quarantine-preserved",it.getString(0))
+        }
+    }
+
+    @Test
+    fun failureInSecondDeleteChunkRollsBackTheEntireReconciliation() = runBlocking {
+        val wire=(10_000L until 13_000L).toSet()
+        dao.upsertHistoryRecords(wire.map { record(it) })
+        dao.upsertHistoryRecords((90_000L until 91_201L).map { record(it) })
+        val before=dao.getAllRecordsSync("test-device-a")
+        val failId=before.filter { it.timestamp !in wire }[700].id
+        database.openHelper.writableDatabase.execSQL("CREATE TRIGGER abort_middle BEFORE DELETE ON temperature_records WHEN OLD.id = $failId BEGIN SELECT RAISE(ABORT, 'injected second-chunk failure'); END")
+        var failed=false
+        try { dao.trimHistoryToWireSet("test-device-a",wire) } catch (_: Exception) { failed=true }
+        org.junit.Assert.assertTrue("Trigger must abort reconciliation",failed)
+        assertEquals(before,dao.getAllRecordsSync("test-device-a"))
+        database.openHelper.writableDatabase.execSQL("DROP TRIGGER abort_middle")
+        var identityChecks=0
+        failed=false
+        try {
+            dao.trimHistoryToWireSet("test-device-a",wire) { ++identityChecks < 3 }
+        } catch (_: IllegalStateException) { failed=true }
+        org.junit.Assert.assertTrue("Lost session identity after first chunk must roll back",failed)
+        assertEquals(before,dao.getAllRecordsSync("test-device-a"))
+        assertEquals(1201,dao.trimHistoryToWireSet("test-device-a",wire))
+        assertEquals(3000,dao.getHistoryRecordCount("test-device-a"))
+    }
 }
 

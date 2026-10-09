@@ -47,6 +47,33 @@ interface TemperatureRecordDao {
         }
     }
 
+    @Query("DELETE FROM temperature_records WHERE deviceId = :deviceId AND isPhoneSample = 0 AND latitude IS NULL AND longitude IS NULL AND id IN (:ids)")
+    suspend fun deleteModuleIds(deviceId: String, ids: List<Long>): Int
+
+    /** Keep exactly the validated wire set, never a timestamp-sorted approximation. */
+    @Transaction
+    suspend fun trimHistoryToWireSet(deviceId: String, timestamps: Set<Long>, stillValid: () -> Boolean = { true }): Int {
+        check(stillValid()) { "Retention session is no longer current" }
+        require(timestamps.size == 3000 && timestamps.all { it > 0 })
+        val module = getAllRecordsSync(deviceId).filter {
+            !it.isPhoneSample && it.latitude == null && it.longitude == null
+        }
+        require(module.map { it.timestamp }.toSet().containsAll(timestamps)) {
+            "Validated wire rows must already be committed before reconciliation"
+        }
+        val obsolete = module.filter { it.timestamp !in timestamps }.map { it.id }
+        var removed = 0
+        for (batch in obsolete.chunked(500)) {
+            check(stillValid()) { "Retention session changed before deletion" }
+            removed += deleteModuleIds(deviceId, batch)
+            check(stillValid()) { "Retention session changed during deletion" }
+        }
+        check(stillValid()) { "Retention session changed before commit" }
+        check(getHistoryRecordCount(deviceId) == 3000) { "Reconciled history must contain exactly 3000 rows" }
+        check(stillValid()) { "Retention session changed after final verification" }
+        return removed
+    }
+
     /**
      * 查询所有记录（按时间戳倒序，timestamp为0的记录放在最后）
      * 仅查询指定设备的记录

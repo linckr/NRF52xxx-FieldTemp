@@ -51,7 +51,10 @@ class LiveHistorySyncTest {
                 Thread.sleep(50)
             }
         }
+        val connection = SavedMaintenanceConnection.create(context, vm,
+            InstrumentationRegistry.getArguments().getString("targetDeviceSha256"))
         waitFor("initial connection and sync") {
+            connection.connectIfDisconnected()
             vm.connectionState.value == BleManager.ConnectionState.ServicesDiscovered &&
                 vm.temperature.value != null && !vm.isFetchingHistory.value &&
                 vm.logs.value.any { it.message.contains("历史数据传输完成") }
@@ -71,8 +74,23 @@ class LiveHistorySyncTest {
             val gpsAfter = rows.filter { it.isPhoneSample || it.latitude != null || it.longitude != null }.associateBy { it.id }
             assertTrue("$label must preserve existing phone rows, including no-GPS samples", gpsBefore.all { (id, row) -> gpsAfter[id] == row })
             val afterByTime = module.associateBy { it.timestamp }
-            assertTrue("$label must preserve original module row IDs",
-                moduleBefore.all { (time, row) -> afterByTime[time]?.id == row.id })
+            val retainedPolicy = vm.isPersistentHistoryRetentionEnabled(address)
+            val protectedModule = if (retainedPolicy) moduleBefore.filterKeys { it in afterByTime } else moduleBefore
+            if (retainedPolicy) {
+                assertTrue("$label requires actual END", vm.logs.value.any { it.message.contains("历史数据传输完成") })
+                assertTrue("$label requires stable complete wire reconciliation", vm.logs.value.any { it.message.contains("本地持续保留已核对3000条") })
+                assertEquals("$label retained module count", 3000, module.size)
+                assertEquals("$label device retained count", 3000L, vm.historyTotalRecords.value)
+                assertTrue("$label retained overlap must be substantial", protectedModule.size >= minOf(100,moduleBefore.size))
+            }
+            protectedModule.forEach { (time, row) ->
+                val current = requireNotNull(afterByTime[time]) { "$label lost protected module timestamp" }
+                assertEquals("$label preserved module ID", row.id, current.id)
+                assertEquals(row.temperature,current.temperature,0f)
+                assertEquals(row.humidity,current.humidity,0f)
+                assertEquals(row.pressure,current.pressure)
+                assertEquals(row.batteryVoltage,current.batteryVoltage)
+            }
             assertTrue("$label future records", module.none { it.timestamp > System.currentTimeMillis() / 1000 + 86400 })
             assertEquals("$label module-only progress count", module.size, dao.getHistoryRecordCount(address))
             Log.i("LiveHistorySyncTest", "$label PASS module=${module.size} gps=${gpsAfter.size}")
@@ -92,14 +110,27 @@ class LiveHistorySyncTest {
         startFull()
         completeFull("full-2-immediate-retry")
         checkDatabase("two-full-downloads")
+        val interruptedBefore = dao.getAllRecordsSync(address).filter {
+            !it.isPhoneSample && it.latitude == null && it.longitude == null
+        }.map { it.id }.toSet()
         startFull()
         waitFor("partial download", 20_000) { (vm.historyProgress.value?.receivedCount ?: 0) >= 100 }
+        assertTrue("Interruption must precede END", vm.isFetchingHistory.value &&
+            vm.logs.value.none { it.message.contains("历史数据传输完成") })
         main { vm.disconnectDevice() }
         waitFor("disconnect invalidates sync", 15_000) {
             vm.connectionState.value == BleManager.ConnectionState.Disconnected && !vm.isFetchingHistory.value
         }
-        main { vm.clearLogs(); vm.connectDevice(address) }
+        val interruptedAfter = dao.getAllRecordsSync(address).filter {
+            !it.isPhoneSample && it.latitude == null && it.longitude == null
+        }.map { it.id }.toSet()
+        assertTrue("A session interrupted before END must not delete any existing module ID",
+            interruptedAfter.containsAll(interruptedBefore))
+        val reconnectConnection = SavedMaintenanceConnection.create(context, vm,
+            InstrumentationRegistry.getArguments().getString("targetDeviceSha256"))
+        main { vm.clearLogs() }
         waitFor("reconnect sync completes", 120_000) {
+            reconnectConnection.connectIfDisconnected()
             vm.connectionState.value == BleManager.ConnectionState.ServicesDiscovered &&
                 vm.temperature.value != null && !vm.isFetchingHistory.value &&
                 vm.logs.value.any { it.message.contains("历史数据传输完成") }
