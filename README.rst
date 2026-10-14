@@ -1,5 +1,9 @@
-nRF52810 温湿度计固件
+历史固件说明
 =====================
+
+当前项目已统一包含 Firmware、Android 和硬件资料。
+请以 `README.md <README.md>`_ 为项目主页；本文件保留早期固件说明，
+其中旧版本容量等信息不作为当前实现依据。
 
 本仓库是 E104-BT5010A（nRF52810）上的 Zephyr 固件，配套 Android 项目为
 ``PandaThemperature-Android``。当前固件版本以根目录 ``VERSION`` 为准。

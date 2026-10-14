@@ -122,7 +122,7 @@ fun ConfigModal(
                         // 电池电压（打开弹窗时快照）
                         InfoItem(
                             label = "电池电压",
-                            value = batteryVoltage?.let { String.format("%.1fV", it) } ?: "--"
+                            value = batteryVoltage?.let { String.format("%.3fV", it) } ?: "--"
                         )
                         // 存储记录数
                         val recordCount = historyTotalRecords ?: deviceStatus?.recordCount?.toLong()

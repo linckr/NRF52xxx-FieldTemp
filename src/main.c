@@ -2155,8 +2155,7 @@ static void bt_ready_cb(int err)
 	bt_ready = true;
 	led_set_bt_ready(true);
 	
-	// 低功耗优化：停止初始化闪烁，LED保持熄灭（等待蓝牙连接时才点亮）
-	led_stop_init_blink();
+	// 上电提示已结束；等待蓝牙连接时保持熄灭
 	led_off(LED_MASK);  // 熄灭所有LED
 	
 	// 延迟启动第一次采集任务（确保系统完全稳定）
@@ -3190,8 +3189,9 @@ int main(void)
 	int err;
 	
 	// 初始化 LED 模块（使用 led.c 封装）
-	// 低功耗优化：LED默认熄灭，只有蓝牙连接时才点亮
+	// 先提示应用启动，再进入未连接蓝牙时熄灯的低功耗状态
 	led_init();
+	led_show_power_on();
 	
 	// 在进行系统其它初始化（尤其是蓝牙、传感器）之前，
 	// 先完成 W25Q64 存储的初始化和（可选的）启动强制擦除，
@@ -3305,9 +3305,6 @@ int main(void)
 	printk("DATA LED: P0.%d, LINK LED: P0.%d\r\n", 31, 5);
 	printk("设备名称: %s (启动后添加MAC后缀)\r\n", DEVICE_NAME_BASE);
 	printk("========================================\r\n");
-	
-	// 低功耗优化：不再启动初始化闪烁，LED保持熄灭
-	// led_start_init_blink();  // 已禁用
 	
 	// 初始化蓝牙（已禁用绑定，无需配对）
 	err = bt_enable(bt_ready_cb);

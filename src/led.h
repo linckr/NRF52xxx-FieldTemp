@@ -26,7 +26,6 @@ extern "C" {
 #define LED_MASK           (DATA_LED_MASK | LINK_LED_MASK)
 
 /* 闪烁间隔定义 */
-#define INIT_BLINK_MS      200  /* 初始化时闪烁间隔200毫秒 */
 #define LINK_BLINK_MS      500  /* LINK灯闪烁间隔500毫秒 */
 #define DATA_BLINK_MS      100  /* DATA灯闪烁间隔100毫秒（时间同步指示）*/
 
@@ -63,14 +62,9 @@ static inline void led_toggle(uint32_t mask)
 }
 
 /**
- * @brief 启动初始化闪烁（两个灯都闪烁）
+ * @brief 应用启动时 LINK 灯闪烁 3 秒，结束后熄灭；仅在蓝牙启动前调用
  */
-void led_start_init_blink(void);
-
-/**
- * @brief 停止初始化闪烁
- */
-void led_stop_init_blink(void);
+void led_show_power_on(void);
 
 /**
  * @brief 启动 LINK 灯闪烁

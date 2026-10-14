@@ -7,7 +7,6 @@
 #include <zephyr/sys/printk.h>
 
 /* 工作队列声明 */
-static struct k_work_delayable init_blink_work;
 static struct k_work_delayable link_blink_work;
 static struct k_work_delayable data_blink_work;
 static struct k_work_delayable data_led_off_work;
@@ -18,13 +17,6 @@ static bool bt_connected_flag = false;
 
 /* DATA灯闪烁计数 */
 static int data_blink_count = 0;
-
-/* 初始化闪烁工作函数（低功耗模式：不再闪烁）*/
-static void init_blink_work_handler(struct k_work *work)
-{
-	/* 低功耗优化：初始化期间不再闪烁LED，保持熄灭 */
-	(void)work;
-}
 
 /* LINK灯闪烁工作函数（低功耗模式：不再闪烁）*/
 static void link_blink_work_handler(struct k_work *work)
@@ -66,7 +58,6 @@ void led_init(void)
 	led_off(LED_MASK);
 	
 	/* 初始化工作队列 */
-	k_work_init_delayable(&init_blink_work, init_blink_work_handler);
 	k_work_init_delayable(&link_blink_work, link_blink_work_handler);
 	k_work_init_delayable(&data_blink_work, data_blink_work_handler);
 	k_work_init_delayable(&data_led_off_work, data_led_off_work_handler);
@@ -87,16 +78,15 @@ void led_set_bt_connected(bool connected)
 	bt_connected_flag = connected;
 }
 
-/* 启动初始化闪烁 */
-void led_start_init_blink(void)
+/* Called once before Bluetooth starts; no extra timer, work item or thread. */
+void led_show_power_on(void)
 {
-	k_work_schedule(&init_blink_work, K_MSEC(INIT_BLINK_MS));
-}
-
-/* 停止初始化闪烁 */
-void led_stop_init_blink(void)
-{
-	k_work_cancel_delayable(&init_blink_work);
+	for (unsigned int pulse = 0; pulse < 6U; ++pulse) {
+		led_on(LINK_LED_MASK);
+		k_msleep(250);
+		led_off(LINK_LED_MASK);
+		k_msleep(250);
+	}
 }
 
 /* 启动 LINK 灯闪烁 */

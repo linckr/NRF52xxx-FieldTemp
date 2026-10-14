@@ -893,7 +893,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val tempStr = realtimeData.temperature?.let { String.format("%.2f", it) } ?: "N/A"
                         val humStr = realtimeData.humidity?.let { String.format("%.2f", it) } ?: "N/A"
                         val pressStr = realtimeData.pressure?.let { String.format("%.1f", it) } ?: "N/A"
-                        val voltageStr = realtimeData.batteryVoltage?.let { " / ${String.format("%.1f", it)}V" } ?: ""
+                        val voltageStr = realtimeData.batteryVoltage?.let { " / ${String.format("%.3f", it)}V" } ?: ""
                         addLog("读取实时数据(V2): ${tempStr}°C / ${humStr}% / ${pressStr}hPa$voltageStr", LogType.SUCCESS)
                         deferred.complete(true)
                     } else {
