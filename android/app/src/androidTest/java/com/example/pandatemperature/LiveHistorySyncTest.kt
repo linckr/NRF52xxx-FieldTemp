@@ -74,15 +74,7 @@ class LiveHistorySyncTest {
             val gpsAfter = rows.filter { it.isPhoneSample || it.latitude != null || it.longitude != null }.associateBy { it.id }
             assertTrue("$label must preserve existing phone rows, including no-GPS samples", gpsBefore.all { (id, row) -> gpsAfter[id] == row })
             val afterByTime = module.associateBy { it.timestamp }
-            val retainedPolicy = vm.isPersistentHistoryRetentionEnabled(address)
-            val protectedModule = if (retainedPolicy) moduleBefore.filterKeys { it in afterByTime } else moduleBefore
-            if (retainedPolicy) {
-                assertTrue("$label requires actual END", vm.logs.value.any { it.message.contains("历史数据传输完成") })
-                assertTrue("$label requires stable complete wire reconciliation", vm.logs.value.any { it.message.contains("本地持续保留已核对3000条") })
-                assertEquals("$label retained module count", 3000, module.size)
-                assertEquals("$label device retained count", 3000L, vm.historyTotalRecords.value)
-                assertTrue("$label retained overlap must be substantial", protectedModule.size >= minOf(100,moduleBefore.size))
-            }
+            val protectedModule = moduleBefore
             protectedModule.forEach { (time, row) ->
                 val current = requireNotNull(afterByTime[time]) { "$label lost protected module timestamp" }
                 assertEquals("$label preserved module ID", row.id, current.id)

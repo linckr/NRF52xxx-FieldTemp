@@ -25,10 +25,9 @@ class HistoryMaintenanceTest {
     fun explicitlyRequestedMaintenance() = runBlocking<Unit> {
         val args = InstrumentationRegistry.getArguments()
         val action = args.getString("maintenanceAction")
-        assumeTrue("Requires explicit maintenanceAction=archive_sync, retain or inspect", action == "archive_sync" || action == "retain" || action == "inspect")
-        if (action == "retain") {
-            assertEquals("Retention requires an explicit limit", "3000", args.getString("retainCount"))
-            assertEquals("Operator must verify the complete archive before device pruning", "true", args.getString("archiveVerified"))
+        assumeTrue("Requires explicit maintenanceAction=archive_sync, disable_retention or inspect", action == "archive_sync" || action == "disable_retention" || action == "inspect")
+        if (action == "disable_retention") {
+            assertEquals("Disable retention requires explicit operator intent", "true", args.getString("disableRetention"))
         }
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -109,10 +108,9 @@ class HistoryMaintenanceTest {
         val gpsBefore = before.filter { it.isPhoneSample || it.latitude != null || it.longitude != null }.associateBy { it.id }
         val moduleBefore = before.filter { !it.isPhoneSample && it.latitude == null && it.longitude == null }.associateBy { it.timestamp }
 
-        if (action == "retain") {
+        if (action == "disable_retention") {
             assertTrue("Firmware must explicitly advertise retention capability", vm.deviceStatus.value?.supportsHistoryRetention == true)
-            assertTrue("Retention was not confirmed by count and idle status", vm.retainLatestDeviceHistory(3000))
-            assertEquals(3000L, vm.historyTotalRecords.value)
+            assertTrue("Retention disabling must be acknowledged by new firmware", vm.disableDeviceHistoryRetention())
             assertFalse(vm.deviceStatus.value!!.isDataClearInProgress)
         }
         received = 0
@@ -120,8 +118,7 @@ class HistoryMaintenanceTest {
         waitFor("requested full synchronization starts", 10_000) { vm.isFetchingHistory.value }
         waitFor("requested full synchronization completes", 600_000) { !vm.isFetchingHistory.value }
         assertTrue("A real end marker is required", vm.logs.value.any { it.message.contains("历史数据传输完成") })
-        if (action == "retain") assertEquals("Retained device data must be fully read back", 3000, received)
-        else assertTrue("Archive synchronization must transfer records", received > 0)
+        assertTrue("Synchronization must transfer records", received > 0)
 
         val after = dao.getAllRecordsSync(address)
         val gpsAfter = after.filter { it.isPhoneSample || it.latitude != null || it.longitude != null }.associateBy { it.id }
@@ -129,7 +126,7 @@ class HistoryMaintenanceTest {
         val moduleAfter = after.filter { !it.isPhoneSample && it.latitude == null && it.longitude == null }
         assertEquals("No duplicate device timestamps", moduleAfter.size, moduleAfter.map { it.timestamp }.distinct().size)
         assertTrue("No future timestamps", moduleAfter.none { it.timestamp > System.currentTimeMillis() / 1000 + 86400 })
-        val latest = moduleAfter.sortedByDescending { it.timestamp }.take(if (action == "retain") 3000 else moduleAfter.size)
+        val latest = moduleAfter
         val overlap = latest.mapNotNull { row -> moduleBefore[row.timestamp]?.let { it to row } }
         assertTrue("Expected substantial retained history overlap", overlap.size >= minOf(100, moduleBefore.size))
         overlap.forEach { (old, current) ->

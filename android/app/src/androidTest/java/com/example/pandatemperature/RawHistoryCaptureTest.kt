@@ -38,10 +38,13 @@ class RawHistoryCaptureTest {
     private fun sha(bytes: ByteArray) = hex(MessageDigest.getInstance("SHA-256").digest(bytes))
 
     @Test
-    fun captureConfirmedRetainedV3Set() = runBlocking<Unit> {
+    fun captureCurrentV3Set() = runBlocking<Unit> {
         val args = InstrumentationRegistry.getArguments()
         assumeTrue("Requires explicit rawHistoryAction=capture", args.getString("rawHistoryAction") == "capture")
-        assertEquals("Capture is allowed only after hardware retention", "3000", args.getString("expectedCount"))
+        val expectedCount = requireNotNull(args.getString("expectedCount")).toInt()
+        require(expectedCount in 1..0xFFFF) { "Explicit current hardware count required" }
+        val captureTimeout = args.getString("captureTimeoutMs")?.toLong() ?: 1_800_000L
+        require(captureTimeout > 0)
         val targetHash = requireNotNull(args.getString("targetDeviceSha256")) { "Explicit target digest required" }.lowercase()
         assertTrue("Invalid target digest", targetHash.length == 64 && targetHash.all { it in '0'..'9' || it in 'a'..'f' })
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -86,13 +89,14 @@ class RawHistoryCaptureTest {
             // Product teardown disables HISTORY notifications and removes its callback before this lock succeeds.
             exclusive = vm.beginExclusiveOta()
             assertTrue("Product history/maintenance still owns BLE; capture not started", exclusive)
+            assertTrue("Raw capture requires a confirmed CCCD disable edge", setHistoryNotification(false))
             val beforeStatus = DeviceStatusParser().parse(read(BleConstants.STATUS_CHAR))!!
             assertFalse("Hardware maintenance busy", beforeStatus.isDataClearInProgress)
             assertTrue("Hardware must support V3 and retention", beforeStatus.supportsHistoryVoltage && beforeStatus.supportsHistoryRetention)
             val beforeInfo = read(BleConstants.HISTORY_INFO_CHAR)
             assertEquals("Expected exact 8-byte HISTORY_INFO", 8, beforeInfo.size)
-            assertEquals("Do not capture the pre-retention 33k ring", 3000, ByteBuffer.wrap(beforeInfo).order(ByteOrder.LITTLE_ENDIAN).int)
-            assertEquals(3000, beforeStatus.recordCount)
+            assertEquals("Hardware count must match the explicit capture receipt", expectedCount, ByteBuffer.wrap(beforeInfo).order(ByteOrder.LITTLE_ENDIAN).int)
+            assertEquals(expectedCount, beforeStatus.recordCount)
             val profile = DeviceProfileFactory.createThermometerProfile(beforeStatus.firmwareVersion, capabilityFlags = beforeStatus.capabilityFlags)
             assertEquals(14, (profile.getHistoryParser("capture-only") as HistoryFormatAware).historyRecordSize)
             val request = profile.buildHistoryRequest(0)
@@ -112,7 +116,7 @@ class RawHistoryCaptureTest {
             var countNoticeReceived = false
             val startedAt = SystemClock.elapsedRealtime()
             val capturedAt = System.currentTimeMillis() / 1000
-            val complete = withTimeoutOrNull(120_000L) {
+            val complete = withTimeoutOrNull(captureTimeout) {
                 while (!endReceived) {
                     val packet = requireNotNull(withTimeoutOrNull(15_000L) { packets.receive() }) { "Raw capture made no progress" }
                     journal.write(ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(packet.size).array())
@@ -125,7 +129,7 @@ class RawHistoryCaptureTest {
                     if (packet.size == 4) {
                         // Firmware CCC emits a uint32 count notice before scheduling any data frames.
                         assertTrue("Unexpected duplicate/late count notice", !countNoticeReceived && seen.isEmpty())
-                        assertEquals(3000, ByteBuffer.wrap(packet).order(ByteOrder.LITTLE_ENDIAN).int)
+                        assertEquals(expectedCount, ByteBuffer.wrap(packet).order(ByteOrder.LITTLE_ENDIAN).int)
                         countNoticeReceived = true
                         continue
                     }
@@ -140,20 +144,20 @@ class RawHistoryCaptureTest {
                             .append(wire.getInt(offset + 8).toLong() and 0xFFFFFFFFL).append(',')
                             .append(wire.getShort(offset + 12).toInt() and 0xFFFF).append('\n')
                     }
-                    assertTrue("Capture exceeds exact 3000-record retained set", seen.size <= 3000)
+                    assertTrue("Capture exceeds explicit current hardware set", seen.size <= expectedCount)
                 }
                 true
             } == true
             assertTrue("Raw hardware END was not received", complete && endReceived)
-            assertEquals("Raw hardware count mismatch", 3000, seen.size)
-            assertEquals(42_000, raw.size())
+            assertEquals("Raw hardware count mismatch", expectedCount, seen.size)
+            assertEquals(expectedCount * 14, raw.size())
             assertTrue("Capture callback teardown failed", setHistoryNotification(false))
             notificationAttempted = false
             val afterInfo = read(BleConstants.HISTORY_INFO_CHAR)
             val afterStatus = DeviceStatusParser().parse(read(BleConstants.STATUS_CHAR))!!
             assertArrayEquals("Hardware ring moved during capture; recapture rather than claim equality", beforeInfo, afterInfo)
             assertFalse("Hardware maintenance still busy", afterStatus.isDataClearInProgress)
-            assertEquals(3000, afterStatus.recordCount)
+            assertEquals(expectedCount, afterStatus.recordCount)
             assertTrue(afterStatus.supportsHistoryVoltage && afterStatus.supportsHistoryRetention)
             val directory = File(context.filesDir, "maintenance/raw-history-${System.currentTimeMillis()}")
             assertTrue("Cannot create capture directory", directory.mkdirs())

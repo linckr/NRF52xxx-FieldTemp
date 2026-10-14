@@ -82,7 +82,7 @@ Application（新固件启动；验签不过则不搬运，设备继续跑旧固
 | 项目 | 值 |
 |---|---|
 | 算法 | **ECDSA-P256**（`SB_CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y`） |
-| 私钥 | 仓库外部的 `root-ec-p256.pem`（**不在仓库内，也不允许复制进仓库**） |
+| 私钥 | 仓库外部生产 ECDSA-P256 PEM（文件名由 `--signing-key` 指定）（**不在仓库内，也不允许复制进仓库**） |
 | 私钥长度 / 格式 | P-256 EC PEM |
 | imgtool 版本 | **2.2.0**（NCS 3.2.1 自带） |
 
@@ -163,8 +163,8 @@ No signature found for the given key
 
 ### 3.7 生产密钥 vs 开发密钥
 
-- 当前**只有一把开发密钥**，用于全部联调。**没有生产密钥。**
-- 上线前必须：生成生产密钥 → 用生产密钥重新构建并烧写**含新公钥的 MCUboot** →
+- 生产 ECDSA-P256 私钥已在仓库外建立；2026-10-14 生产公钥已部署到设备 MCUboot，正式1.0.10+0通过真实电池冷启动及生产签名 OTA 搬运回读。生产公开 DER SHA256：`af13ba64a82bb8cfe0273b04ad82883596115ff76b06349ae8516c409a537512`。开发密钥不再是当前设备信任根。
+- 新设备部署须用生产密钥重新构建并烧写**含对应公钥的 MCUboot** →
   之后只接受生产密钥签出的镜像。切换私有产密钥而不重烧 MCUboot，会导致所有新镜像验签失败。
 - 私钥一旦丢失，无法再为已部署设备签出可用的升级镜像 —— **必须离线备份**。
 
@@ -343,3 +343,9 @@ MCUboot 随后按固定布局解析（magic `0x96F3B83D`、`ih_hdr_size = 512`�
 | 只更 MCUboot | `build-*/mcuboot/zephyr/zephyr.hex` | pyOCD（注意会动 `0x0`–`0x8000`） |
 
 2026-09-15 clean sysbuild 参考产物：`merged.hex` 512,120 B、`dfu_application.zip` 150,997 B。
+
+## 2026-10-14 当前生产验证
+
+生产签名 TEST_ONLY 1.0.10+1 已经 OTA 安装并完整回读主槽152348 B匹配；随后通过 OTA 恢复正式 sysbuild 1.0.10+0（VERIFY31.533 s、TRIGGER21.822 s），最终主槽152347 B完整匹配，SHA256 `c439dfdcd5b5242a9978d7d2555e029f5bb7bb43c67d684d8e7b4a3bc0e376dd`，MCUboot未变、VTOR0x8200、CFSR/HFSR=0。临时+1镜像不发布。
+
+正式裸App151684 B，signed152347 B、MCUboot31876 B、RAM23080 B。旧尺寸表与1.0.8反证属于历史记录。当前公开密钥 imgtool verify已通过；Android1.1.3/code5生产APK验签通过，但手机运行Debug APK，未声称生产APK安装运行。INIT22未定因，详见 [生产诊断](docs/20261014-production-deployment-diagnosis.md)。

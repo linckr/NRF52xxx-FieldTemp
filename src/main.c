@@ -162,6 +162,7 @@ static uint32_t history_skipped_invalid = 0;      // 跳过的无效记录数（
 static uint32_t history_skipped_filtered = 0;     // 时间戳过滤跳过的记录数
 // 历史数据通知发送控制（使用 bt_gatt_notify_cb 做“发完再发”流控）
 static struct bt_gatt_notify_params history_notify_params;
+static uint32_t history_transfer_epoch;
 static bool history_sending = false;                      // 是否有在途的历史通知
 static uint8_t history_wire_size = 12U;
 static uint8_t history_tx_buf[60];                        // 历史数据发送缓冲区（需保持到回调结束）
@@ -201,6 +202,8 @@ static uint16_t retention_prefix;
 static uint32_t retention_scan_cursor;
 static uint32_t retention_scan_remaining;
 #define HISTORY_SLOT_COUNT (W25Q64_MAX_SECTORS_LIMIT * W25Q64_RECORDS_PER_SECTOR)
+/* Sector erasure requires one complete spare sector; physical partitions stay unchanged. */
+#define HISTORY_RING_CAPACITY ((W25Q64_MAX_SECTORS_LIMIT - 1U) * W25Q64_RECORDS_PER_SECTOR)
 BUILD_ASSERT(sizeof(struct data_record) == W25Q64_RECORD_SIZE);
 BUILD_ASSERT(sizeof(history_tx_buf) >= 4U * 14U);
 
@@ -281,7 +284,7 @@ static void retention_work_handler(struct k_work *work)
     int ret = 0;
     k_mutex_lock(w25q64_get_mutex(), K_FOREVER);
     if (retention_phase == 0U) {
-        retention.limit = 3000U;
+        retention.limit = HISTORY_RING_CAPACITY;
         retention.gc_sector = oldest_sector;
         retention_scan_begin();
         retention_phase = 1U;
@@ -345,7 +348,8 @@ again:
 }
 static int retention_request(uint32_t limit)
 {
-    if (limit != 3000U) return -EINVAL;
+    /* Zero cancels the user policy; only the existing physical ring capacity remains. */
+    if (limit != 0U) return -EINVAL;
     if (retention_busy || data_clear_in_progress || history_transfer_active ||
             ble_ota_in_progress()) return -EBUSY;
     /* The work runs on the same queue as sampling. There is no erase on the GATT thread. */
@@ -1203,6 +1207,15 @@ static ssize_t history_info_char_read_cb(struct bt_conn *conn,
 	return bt_gatt_attr_read(conn, attr, buf, len, offset, data, sizeof(data));
 }
 
+/* A dropped completion at disconnect must not block the next history session. */
+static void history_cancel_transfer(void)
+{
+    ++history_transfer_epoch;
+    history_transfer_active = false;
+    history_sending = false;
+    k_work_cancel_delayable(&history_send_work);
+}
+
 // 历史数据特性通知配置回调
 static void history_char_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
@@ -1253,12 +1266,9 @@ static void history_char_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16
 	
 	if (notify_enabled && (retention_busy || data_clear_in_progress)) return;
 	if (notify_enabled) {
+        history_cancel_transfer();
 		// 启用通知，开始发送历史数据
 		// 强制重置状态，确保每次启用通知都能从头开始传输
-		if (history_transfer_active) {
-			// 如果之前正在传输，先取消
-			k_work_cancel_delayable(&history_send_work);
-		}
 		history_transfer_active = true;
 		// 重置二分查找标记，允许重新定位
 		history_binary_search_done = false;
@@ -1310,6 +1320,7 @@ static void history_char_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16
 			printk("[历史] 数据通知已禁用 (传输不在进行中)\r\n");
 		}
 		
+        history_cancel_transfer();
 		// 无论如何都重置传输状态，确保下次启用时从头开始
 		history_transfer_sector = 0;
 		history_transfer_record_idx = 0;
@@ -1618,6 +1629,14 @@ static uint16_t clear_data_failed_count = 0;
 static void clear_data_work_handler(struct k_work *work)
 {
 	if (clear_data_progress == 0) {
+        /* Invalidate the logical checkpoint before CLEAR can erase any history. */
+        history_retention_t cleared = { .magic = HISTORY_RETENTION_MAGIC,
+                                        .gc_sector = HISTORY_GC_DONE };
+        if (nvs_save_history_retention(&cleared) != 0) {
+            k_work_schedule(&clear_data_work, K_SECONDS(1));
+            return;
+        }
+        memset(&retention, 0, sizeof(retention));
 		// 初始化：停止采集和历史传输
 		k_timer_stop(&sample_timer);
 		printk("[清空数据] 已停止采集定时器\r\n");
@@ -1742,7 +1761,8 @@ static ssize_t clear_data_char_write_cb(struct bt_conn *conn,
 		return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
 	}
 	
-	if (data_clear_in_progress || retention_busy || retention.limit) {
+	if (data_clear_in_progress || retention_busy ||
+            (retention.limit && retention.limit < HISTORY_RING_CAPACITY)) {
 		printk("[清空数据] 警告: 清空操作正在进行中，忽略重复请求\r\n");
 		return BT_GATT_ERR(BT_ATT_ERR_WRITE_NOT_PERMITTED);
 	}
@@ -2061,6 +2081,7 @@ static void bt_connected_cb(struct bt_conn *conn, uint8_t err)
 static void bt_disconnected_cb(struct bt_conn *conn, uint8_t reason)
 {
 	bt_connected = false;
+    history_cancel_transfer();
 	led_set_bt_connected(false);
 	printk("蓝牙已断开 (原因: %d)\r\n", reason);
 	
@@ -2171,7 +2192,7 @@ static uint32_t __maybe_unused get_current_timestamp(void)
 // W25Q64存储布局：
 // - 每条记录12字节：timestamp(4) + temperature(2) + humidity(2) + pressure/voltage编码字(4)
 // - 每页21条、每扇区336条；history物理区1MiB，共256扇区，环形逻辑容量按65000条限制为194扇区
-// - 启用retention.limit后按持续逻辑窗口保留（当前命令支持3000条），不改变物理分区
+// - 旧3000条窗口升级到原环形容量；key7继续保护有效记录边界，不改变物理分区
 // - 使用环形缓冲区，按扇区擦除
 
 // 存储管理变量（改用扇区索引）- 已在前面声明
@@ -2783,7 +2804,7 @@ static uint16_t binary_search_start_sector(uint32_t target_timestamp)
 static void history_notify_cb(struct bt_conn *conn, void *user_data)
 {
 	ARG_UNUSED(conn);
-	ARG_UNUSED(user_data);
+	if ((uint32_t)(uintptr_t)user_data != history_transfer_epoch) return;
 
 	history_sending = false;
 
@@ -3123,6 +3144,7 @@ static void history_send_work_handler(struct k_work *work)
 		history_notify_params.data = history_tx_buf;
 		history_notify_params.len  = tx_len;
 		history_notify_params.func = history_notify_cb;
+        history_notify_params.user_data = (void *)(uintptr_t)history_transfer_epoch;
 
 		history_sending = true;
 		int err = bt_gatt_notify_cb(NULL, &history_notify_params);
@@ -3212,7 +3234,8 @@ int main(void)
 		next_sector = pos.next_sector;
 		oldest_sector = pos.oldest_sector;
 		next_record_in_sector = pos.next_record_in_sector;
-        if (nvs_load_history_retention(&retention) == 0 && retention.limit == 3000U &&
+        if (nvs_load_history_retention(&retention) == 0 &&
+                (retention.limit == 3000U || retention.limit == HISTORY_RING_CAPACITY) &&
                 retention.head_sector < W25Q64_MAX_SECTORS_LIMIT &&
                 retention.head_record <= W25Q64_RECORDS_PER_SECTOR &&
                 retention.first_sector < W25Q64_MAX_SECTORS_LIMIT &&
@@ -3222,6 +3245,8 @@ int main(void)
             next_sector = retention.head_sector;
             next_record_in_sector = retention.head_record;
             oldest_sector = retention.first_sector;
+            /* Upgrade the old window before scanning; keep its exact first/head checkpoint. */
+            retention.limit = HISTORY_RING_CAPACITY;
         } else {
             memset(&retention, 0, sizeof(retention));
         }

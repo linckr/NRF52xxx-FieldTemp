@@ -33,7 +33,7 @@
 | `sysbuild/mcuboot.conf` | MCUboot 自身的 Kconfig（SPI NOR、布局页 4096、RC 32k、关日志） |
 | `sysbuild/mcuboot.overlay` | MCUboot 的 devicetree（**与 App 独立，改引脚要同步改**） |
 | `pm_static.yml` | Partition Manager 静态布局（**唯一编辑入口**） |
-| `VERSION` | **镜像版本号唯一来源**（当前 `1.0.9` + tweak `0`） |
+| `VERSION` | **镜像版本号唯一来源**（正式 `1.0.10` + tweak `0`，TEST_ONLY+1不发布） |
 | `tools/build_sysbuild.py` | 构建包装（引号安全 + 签名私钥注入），见 §2 |
 
 ### 关键 Kconfig（摘自实际构建）
@@ -139,7 +139,7 @@ $env:PYTHONPATH = "C:/ncs/v3.2.1/bootloader/mcuboot/scripts"
 C:\ncs\toolchains\66cdf9b75e\opt\bin\python.exe -m imgtool.main verify `
   --key $env:MCU_BOOT_SIGNING_KEY `
   build-v9\NRF52xxx-FieldTemp\zephyr\zephyr.signed.bin
-# 当前源码构建期望：Image was correctly validated / Image version: 1.0.9+0
+# 正式源码构建期望：Image was correctly validated / Image version: 1.0.10+0
 ```
 
 ### 2.5 查看构建产物
@@ -322,7 +322,7 @@ C:\Users\linckr\.workbuddy\binaries\python\envs\default\Scripts\python.exe tools
 | `targetSdk` | **36** | 同上 |
 | `minSdk` | **26** | 同上 |
 | `applicationId` / `namespace` | `com.example.pandatemperature` | 同上 |
-| `versionCode` / `versionName` | **4 / "1.1.2"** | 同上（**与固件版本无关**） |
+| `versionCode` / `versionName` | **5 / "1.1.3"** | 同上（**与固件版本无关**） |
 | Java / Kotlin target | 11 | 同上 |
 | 构建变体 | `debug` / `release` | 无 flavor |
 
@@ -467,7 +467,7 @@ Windows 上跑 `tools/ota_host_client.py` / `free_ble.py` 之前：
    → 必须把 `connect + start_notify + START` 作为**整体**重试。
 5. 客户端脚本要加 `python -u`，否则重定向到文件时看不到进度。
 
-## 2026-10-09 P2构建与生产签名阶段
+## 历史：2026-10-09 P2构建与生产签名阶段
 
 开发签名 `build-p2-dev` 已完成sysbuild及门禁：Flash151540 B、signed152203 B、RAM23080 B；
 相对v8增加Flash2012 B、RAM128 B，RAM余1496 B；MCUboot仍31876 B，余892 B。
@@ -482,18 +482,18 @@ native C测试通过TinyCC编译真实生产函数及实际序列化片段，NOR
 python tools/test_history_storage.py --cc "<本机native C编译器路径>" --work-dir "<本机临时目录>"
 ```
 
-Android124项单测通过，生产签名APK已验签；当前源码versionCode4/versionName1.1.2。
+Android124项单测通过，生产签名APK已验签；该历史批次versionCode4/versionName1.1.2。
 生产密钥及签名配置全部在仓库外；Android使用PANDA_RELEASE_KEYSTORE_PROPERTIES注入外置配置，
 固件使用MCU_BOOT_SIGNING_KEY或--signing-key。不要把真实文件、路径细节或内容写入Git。
 生产ECDSA公钥必须先通过SWD配置到MCUboot，现有设备只信任原公钥，不能直接OTA换成新签名。
 生产APK验签与设备固件生产信任部署是不同验收项。
 
-已完成开发信任链 1.0.9 升级与主槽逐字节回读、V3 历史回读和硬件精确保留3000条；P3已取得擦除流程、部分写入、END后和暂停搬运流程的真实电池断电恢复证据，但不证明 NOR/NVMC 忙脉冲中断电。保留策略冷启动持久性已验证；realme到小米数据库迁移已完成；持续App3000策略retain验收通过，最新Live回归已通过；生产信任链部署待完成。 具体证据与耗时见HANDOFF最新阶段记录。
+已完成开发信任链 1.0.9 升级与主槽逐字节回读、V3 历史回读和硬件精确保留3000条；P3已取得擦除流程、部分写入、END后和暂停搬运流程的真实电池断电恢复证据，但不证明 NOR/NVMC 忙脉冲中断电。保留策略冷启动持久性已验证；realme到小米数据库迁移已完成；持续App3000策略retain验收通过，最新Live回归已通过；该历史时点生产信任待部署；现公钥已部署，生产OTA搬运/恢复正式0及新版Live均已取证通过。 具体证据与耗时见HANDOFF最新阶段记录。
 原始数据已本机留档并确认SWD识别；私人数据库、完整备份及凭据不随提交上传。
 
-### 2026-10-10 当前验收状态：App 1.1.2 / 持续3000条
+### 历史：2026-10-10 App1.1.2 / 3000条策略（已由10月14日需求取消）
 
-当前App为versionCode4 / versionName1.1.2、Room11，手机安装Debug APK；Firmware为开发信任链1.0.9。124项JVM单元测试、10项isolated Room测试通过；生产1.1.2 APK v2/RSA3072验签通过、证书未变，尚未安装生产APK。最新Live连续全量/立即重试/中途断连/重连回归171.105 s通过；最终归档结果见本节末。
+该历史批次App为versionCode4 / versionName1.1.2、Room11，手机安装Debug APK；Firmware为开发信任链1.0.9。124项JVM单元测试、10项isolated Room测试通过；生产1.1.2 APK v2/RSA3072验签通过、证书未变，尚未安装生产APK。最新Live连续全量/立即重试/中途断连/重连回归171.105 s通过；最终归档结果见本节末。
 
 手机已完成realme完整数据库到小米迁移（主库SHA匹配源归档），原小米1,042条GPS已备份、未并入。随后按完整归档及硬件raw集合应用精简；早先一次精简后App增至3004而硬件仍3000，确认一次性精简不足，现已实现持续策略。最新明确retain真机36.388 s通过：硬件3000、App模块3000、手机来源样本208；启用标记已持久化。手机样本包含有/无GPS，模块3000不等于整个数据库总行数；隔离记录及私人完整档案仍保留本机，不上传。
 
@@ -501,16 +501,40 @@ Android124项单测通过，生产签名APK已验签；当前源码versionCode4/
 
 Room11的isPhoneSample采用INTEGER NOT NULL DEFAULT0；新手机实时行始终true，即使没有GPS。10→11无损迁移把已有GPS行标为phone，旧无GPS来源未知保守默认false；在完整归档后按真实wire集合核对，不能靠年份猜测删除。历史DAO/count/增量仅处理false且geoNull；所有phone/GPS、隔离表和其他设备受保护。严格核心数值断言曾阻止单行旧手机实时/硬件差异的错误精简，没有通过放宽断言绕过。测试覆盖来源保护、精确164缓存差集、1201条跨删除批次、SQL中段abort和session失效原子回滚。
 
-硬件3000策略已在隔离整根SWD后的实际电池断电冷启动验证：archive_sync23.296 s、完整3000及核心/GPS/无重复/未来检查通过；再次raw19.434 s通过（3000 V3、42000 B、END、8 B INFO稳定）。此前小米1.1.0 archive_sync79.289 s通过是历史证据；当前1.1.2也已独立完成Live回归，见本节末。VDD2.765 V为10/9约18:45观测、2.875 V为10/10约00:17 VM观测，均非当前实时读数，ADC仍未校准/无万用表对照。
+硬件3000策略已在隔离整根SWD后的实际电池断电冷启动验证：archive_sync23.296 s、完整3000及核心/GPS/无重复/未来检查通过；再次raw19.434 s通过（3000 V3、42000 B、END、8 B INFO稳定）。此前小米1.1.0 archive_sync79.289 s通过是历史证据；该历史版本1.1.2也已独立完成Live回归，见本节末。VDD2.765 V为10/9约18:45观测、2.875 V为10/10约00:17 VM观测，均非当前实时读数，ADC仍未校准/无万用表对照。
 
 P3四阶段已取得擦除流程、部分写入、END后及暂停MCUboot搬运的真实电池断电恢复证据；不证明NOR WIP/NVMC写脉冲被切断。SWD仍连接时曾出现W25Q64 init_res=22，根因未定，隔离SWD重试通过不等于已定位。旧v8硬件尾部14条曾被覆盖，timestamp/传感器数值14/14均在本机完整App档案保全；新恢复函数已有真实C回归与冷启动证据。
 
-固件资源保持App Flash151540 B、RAM23080 B（余1496 B），MCUboot31876 B（余892 B），分区不变。DEV signed候选152203 B已真机回读；生产asset152202 B未部署，DER长度可变。两镜像App payload151540 B逐字节一致，SHA256 `236323e4319f7228ce6b4856bb1736a4bede1cf58e3dfc85239678bdc943494c`；完整signed文件不能混同。生产imgtool验证通过，但生产MCUboot公钥信任尚未部署、候选产物入口为 [v1.0.9-rc.1](https://github.com/linckr/NRF52xxx-FieldTemp/releases/tag/v1.0.9-rc.1)，发布状态以页面为准；两个upstream PR #2在最近记录时OPEN，后续实时核对。
+固件资源保持App Flash151540 B、RAM23080 B（余1496 B），MCUboot31876 B（余892 B），分区不变。DEV signed候选152203 B已真机回读；生产asset152202 B未部署，DER长度可变。两镜像App payload151540 B逐字节一致，SHA256 `236323e4319f7228ce6b4856bb1736a4bede1cf58e3dfc85239678bdc943494c`；完整signed文件不能混同。生产imgtool验证通过，但该历史批次生产MCUboot公钥信任尚未部署（现已部署，见10月14日状态）、候选产物入口为 [v1.0.9-rc.1](https://github.com/linckr/NRF52xxx-FieldTemp/releases/tag/v1.0.9-rc.1)，发布状态以页面为准；两个upstream PR #2在最近记录时OPEN，后续实时核对。
 
-持续策略与Live验收已完成，最终归档模块3000；生产信任部署与ADC校准仍是独立待办。
+该历史批次3000策略与Live已验收；此策略现已取消，当前新版Live/生产OTA读回和ADC待办见10月14日状态。
 
-### 最终Live与一致归档验收
+### 历史：2026-10-10 Live与一致归档验收
 
 最终真机Live回归171.105 s通过：两次连续全量各3000、立即重试、收到部分记录后断连且全部既有模块ID未删除、重连及再次同步完成3000；仍保留窗口内记录ID/核心字段和所有既有手机样本，无重复/未来时间。重连首轮观察到0条历史、随后一次自动全量重试成功；本轮已由有界重试覆盖，但首次重连延迟为Medium性能边界，根因未定位。
 
 最终只读一致归档（2026-10-10约01:12）SQLite integrity ok：模块3000、GPS187、无GPS手机样本31（受保护手机样本共218）、active3218、quarantine22484，未来时间0、模块重复0。Live期间VM电压开始2.886 V、结束2.868 V（本轮观测，不是ADC校准证明）。App已恢复运行；手机临时USB亮屏设置已恢复原值。私人数据库、档案路径、标识与归档内容不进Git。
+
+### 2026-10-14 当前状态：取消3000限制 / 生产信任部署
+
+正式源码Firmware1.0.10+0、App1.1.3/code5、Room11。App移除3000条裁剪、旧prefs门禁与强制全量，恢复正常模块增量；历史电压、isPhoneSample及有/无GPS手机行保护保留。硬件有效环容量64848条（194扇区中保留1完整备用扇区），不是无限物理Flash、不是精确65000；secondary/NVS/history地址及容量没有修改。旧3000检查点自动拓宽时保留精确首记录/写头/GC信息，不清空历史、不猜时间排序。
+
+当前维护仅支持cap0x80的HISTORY `[0 LE32,04]` 取消数量策略，拒绝3000。旧1.0.9拒绝0时App明确未确认；绝不回退3000或CLEAR。新App历史启动要求确认DISABLE→请求写入→ENABLE；旧Gatt回调不得消费当前连接的ACK或清新状态。
+
+生产MCUboot公钥及正式1.0.10+0已SWD部署，当前OTA必须使用其对应生产私钥签名（OTA_AUTH_KEY不是可信边界），完整内部回读逐字节匹配、UICR未修改、VTOR=0x8200/CFSR/HFSR=0。用户拔除整根SWD后真实电池断电冷启动，亮灯及连接恢复。取消0命令与完整历史回读32.858 s通过：硬件3010、App模块3039、手机来源样本252，电压3.029 V、cap0xFF、状态patch10；本轮实际已超过3000。手机运行Debug APK，生产Release APK已构建验签但未声称安装。
+
+生产签名 TEST_ONLY 1.0.10+1 已经 OTA 安装并完整回读主槽152348 B匹配；随后通过 OTA 恢复正式 sysbuild 1.0.10+0（VERIFY31.533 s、TRIGGER21.822 s），最终主槽152347 B完整匹配，SHA256 `c439dfdcd5b5242a9978d7d2555e029f5bb7bb43c67d684d8e7b4a3bc0e376dd`，MCUboot未变、VTOR0x8200、CFSR/HFSR=0。临时+1镜像不发布。
+
+资源：App Flash151684 B、RAM23080 B（余1496 B）、MCUboot31876 B（余892 B），所有分区不变。123项JVM测试、9项串行真实isolated Room测试通过（12.339 s）；Debug/testAPK/Release及完整lintRelease通过、lint零错误，生产APK v2/RSA3072证书与原生产证书一致。此前错误测试classname/并发instrumentation造成的processcrashed属于执行错误，不是已证App崩溃。
+
+旧v9真实生产disconnect/notify回调代码的丢ACK残留发送标志缺陷已用native测试确认；新epoch/stop保护旧回调不能清新inflight，fixture0 failures。但旧现场本轮没进入Services，SWD bt_connected=0/history_sending=0，**未抓到历史发送hang**；新版 Live 真机回归74.233 s通过：连续两次全量各3026条、部分断线不删除已有ID、重连后下一次10秒采样内收到历史、实时恢复；本轮未观察到旧版60秒零历史等待。最终一致归档 integrity ok：模块3056、GPS187、无GPS手机样本78、active3321、quarantine22484，未来日期0、模块重复0。该回归支持修复有效，未证明历史现场一定由同一缺陷触发。
+
+INIT22仍未定因：3次暖重置JEDEC正确、rc=0，独立冷启动成功，当前未复现，不能写为已解决。ADC仍未校准。旧P3四阶段流程真实去电证据为历史验收，不证明NOR WIP/NVMC忙脉冲断电。旧v8丢失的14条均在本机完整档案保全；已裁剪历史不会凭取消策略自动恢复。私钥、auth凭据、私人档案及手机标识不进入Git。
+
+下一步：采集 INIT22 实际失败时的 JEDEC/SR/VDD/SPI 证据，并完成 ADC 校准；生产 Release APK 的安装与运行仍需独立验证。
+
+### 2026-10-14 生产OTA主槽回读
+
+生产签名 TEST_ONLY 1.0.10+1 已经 OTA 安装并完整回读主槽152348 B匹配；随后通过 OTA 恢复正式 sysbuild 1.0.10+0（VERIFY31.533 s、TRIGGER21.822 s），最终主槽152347 B完整匹配，SHA256 `c439dfdcd5b5242a9978d7d2555e029f5bb7bb43c67d684d8e7b4a3bc0e376dd`，MCUboot未变、VTOR0x8200、CFSR/HFSR=0。临时+1镜像不发布。
+
+新版 Live 真机回归74.233 s通过：连续两次全量各3026条、部分断线不删除已有ID、重连后下一次10秒采样内收到历史、实时恢复；本轮未观察到旧版60秒零历史等待。最终一致归档 integrity ok：模块3056、GPS187、无GPS手机样本78、active3321、quarantine22484，未来日期0、模块重复0。该回归支持修复有效，未证明历史现场一定由同一缺陷触发。

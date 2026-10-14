@@ -1,19 +1,19 @@
 # Android 客户端
 
-统一仓库的android/与独立Android仓库的source/均为Gradle根目录；本README在独立仓库位于仓库根目录。当前开发以统一项目为准，不在两份副本各自开发；交付不包含Git历史、产物、手机数据库或真实凭据。
+统一仓库android/与独立仓库source/均是Gradle根目录。本README在独立仓库根目录；本地交接文件随对应布局同步，公共入口使用canonical链接：[CODEX_START_HERE](https://github.com/linckr/NRF52xxx-FieldTemp/blob/main/CODEX_START_HERE.md)、[PROTOCOL](https://github.com/linckr/NRF52xxx-FieldTemp/blob/main/PROTOCOL.md)。
 
-当前App **1.1.2 / versionCode4**，Room11。使用JDK17和本机Android SDK，在上述Gradle根目录执行 `gradlew.bat testDebugUnitTest assembleDebug`；SDK通过ANDROID_HOME或忽略的local.properties设置。OTA/签名凭据只在本机注入，生产配置通过PANDA_RELEASE_KEYSTORE_PROPERTIES读取仓库外文件，模板不是实际凭据。
+当前App **1.1.3/code5**、Room11。JDK17+本机SDK构建；SDK路径/OTA授权/签名凭据只在本机注入，模板不是凭据，私钥和手机档案不提交。123 JVM、9串行Room、Debug/testAPK/生产Release及完整lint通过（零错误）；生产APK证书不变，手机运行Debug。
 
-接手与真机记录见本目录[HANDOFF.md](HANDOFF.md)。公共架构和协议以[CODEX_START_HERE.md](https://github.com/linckr/NRF52xxx-FieldTemp/blob/main/CODEX_START_HERE.md)与[PROTOCOL.md](https://github.com/linckr/NRF52xxx-FieldTemp/blob/main/PROTOCOL.md)为准；这些链接兼容统一android/与独立source/布局。
+已取消App固定3000精简及强制全量，正常增量保留全部模块历史；isPhoneSample保护有/无GPS手机行，V3历史电压保持。当前cap0x80维护只发HISTORY[0LE32,04]，必须ACK+idle确认，旧v9拒绝即明确失败，不写CLEAR或回退3000。历史通知确认DISABLE→request→ENABLE，旧Gatt回调不改新会话。
 
-0x40能力位与5 B HISTORY请求尾03共同选择V3 14 B；旧4 B请求保持12 B。0x80 + HISTORY保留命令确认后启用逐设备本地持续3000策略，不向CLEAR发送保留请求，不按版本或包长猜布局。完整END、3000唯一wire时间戳、前后8 B INFO稳定、upsert成功且目标会话仍有效才事务精简模块记录；失败不删，最多重试一次。Room11明确手机采样来源，保护有/无GPS手机行、隔离记录及其他设备；不能按时间排序近似裁剪。
+生产boot及正式1.0.10+0已SWD完整回读、UICR未改，独立电池冷启动连接成功。有效硬件容量64848（一个备用扇区），取消+全量32.858s通过：硬件3010/App模块3039/手机样本252，已超过3000。生产签名 TEST_ONLY 1.0.10+1 已经 OTA 安装并完整回读主槽152348 B匹配；随后通过 OTA 恢复正式 sysbuild 1.0.10+0（VERIFY31.533 s、TRIGGER21.822 s），最终主槽152347 B完整匹配，SHA256 `c439dfdcd5b5242a9978d7d2555e029f5bb7bb43c67d684d8e7b4a3bc0e376dd`，MCUboot未变、VTOR0x8200、CFSR/HFSR=0。临时+1镜像不发布。
 
-124项JVM和10项isolated Room测试通过；1.1.2生产APK v2/RSA3072验签通过、未安装。realme到小米迁移及精简已应用，持续策略retain真机36.388 s通过：硬件/App模块各3000、retain时手机样本208；最新Live连续同步/断连重连回归171.105 s通过。最终一致归档模块3000/GPS187/无GPS手机31，active3218、隔离22484、未来/重复0。
+新版 Live 真机回归74.233 s通过：连续两次全量各3026条、部分断线不删除已有ID、重连后下一次10秒采样内收到历史、实时恢复；本轮未观察到旧版60秒零历史等待。最终一致归档 integrity ok：模块3056、GPS187、无GPS手机样本78、active3321、quarantine22484，未来日期0、模块重复0。该回归支持修复有效，未证明历史现场一定由同一缺陷触发。
 
-硬件冷启动保留/raw集合及P3四阶段流程真实去电已有恢复证据，不证明NOR/NVMC忙脉冲断电。设备仍开发信任链1.0.9、手机Debug；生产MCUboot公钥尚未部署、候选产物入口为 [v1.0.9-rc.1](https://github.com/linckr/NRF52xxx-FieldTemp/releases/tag/v1.0.9-rc.1)，发布状态以页面为准，INIT22根因与ADC校准仍待解决。完整档案、手机标识和凭据不上传；详细证据及剩余任务见交接文档。
+INIT22三暖重置未复现、JEDEC/rc正常，但根因未知；ADC未校准，旧P3不证明忙脉冲断电。详细当前记录见交接文档；旧App1.1.2/3000回归明确为历史，不作为当前限制或新版Live验收。
 
-### 最终Live与一致归档验收
+### 2026-10-14 生产OTA主槽回读
 
-最终真机Live回归171.105 s通过：两次连续全量各3000、立即重试、收到部分记录后断连且全部既有模块ID未删除、重连及再次同步完成3000；仍保留窗口内记录ID/核心字段和所有既有手机样本，无重复/未来时间。重连首轮观察到0条历史、随后一次自动全量重试成功；本轮已由有界重试覆盖，但首次重连延迟为Medium性能边界，根因未定位。
+生产签名 TEST_ONLY 1.0.10+1 已经 OTA 安装并完整回读主槽152348 B匹配；随后通过 OTA 恢复正式 sysbuild 1.0.10+0（VERIFY31.533 s、TRIGGER21.822 s），最终主槽152347 B完整匹配，SHA256 `c439dfdcd5b5242a9978d7d2555e029f5bb7bb43c67d684d8e7b4a3bc0e376dd`，MCUboot未变、VTOR0x8200、CFSR/HFSR=0。临时+1镜像不发布。
 
-最终只读一致归档（2026-10-10约01:12）SQLite integrity ok：模块3000、GPS187、无GPS手机样本31（受保护手机样本共218）、active3218、quarantine22484，未来时间0、模块重复0。Live期间VM电压开始2.886 V、结束2.868 V（本轮观测，不是ADC校准证明）。App已恢复运行；手机临时USB亮屏设置已恢复原值。私人数据库、档案路径、标识与归档内容不进Git。
+新版 Live 真机回归74.233 s通过：连续两次全量各3026条、部分断线不删除已有ID、重连后下一次10秒采样内收到历史、实时恢复；本轮未观察到旧版60秒零历史等待。最终一致归档 integrity ok：模块3056、GPS187、无GPS手机样本78、active3321、quarantine22484，未来日期0、模块重复0。该回归支持修复有效，未证明历史现场一定由同一缺陷触发。

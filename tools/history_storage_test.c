@@ -13,6 +13,7 @@
 #define K_SECONDS(n) (n)
 #define K_MSEC(n) (n)
 #define printk(...) ((void)0)
+struct bt_conn { int unused; };
 struct k_work { int unused; };
 struct k_work_delayable { int unused; };
 struct k_mutex { int unused; };
@@ -22,7 +23,17 @@ static uint16_t next_sector, oldest_sector, next_record_in_sector, history_inter
 static struct data_record ram_buffer[RAM_BUFFER_SIZE];
 static uint8_t ram_buffer_count, history_tx_buf[60], history_wire_size;
 static bool time_synced = true, sector_switched_flag, position_dirty;
-static bool data_clear_in_progress, history_transfer_active;
+static bool data_clear_in_progress, history_transfer_active, history_sending, bt_connected, bt_ready;
+static uint32_t history_start_timestamp;
+#define LINK_LED_MASK 1
+static void led_set_bt_connected(bool b) { (void)b; }
+static void led_stop_link_blink(void) {}
+static void led_off(unsigned n) { (void)n; }
+static void ble_adv_set_connected(bool b) { (void)b; }
+static void ble_adv_schedule_restart(void) {}
+static void ble_adv_schedule_slow(unsigned n) { (void)n; }
+static uint32_t history_transfer_epoch;
+static struct k_work_delayable history_send_work;
 static history_retention_t saved_metadata;
 static int nvs_failures, program_fault, erase_count;
 static unsigned failures;
@@ -31,6 +42,7 @@ static struct k_mutex *w25q64_get_mutex(void) { return NULL; }
 static void k_mutex_lock(struct k_mutex *p,int t) { (void)p;(void)t; }
 static void k_mutex_unlock(struct k_mutex *p) { (void)p; }
 static void k_work_schedule(struct k_work_delayable *p,int t) { (void)p;(void)t; }
+static void k_work_cancel_delayable(struct k_work_delayable *p) { (void)p; }
 static bool ble_ota_in_progress(void) { return false; }
 static bool w25q64_is_ready(void) { return true; }
 static void w25q64_wakeup(void) {}
@@ -130,8 +142,13 @@ static void wires(void) {
     CHECK(history_decode_pressure(old.pressure_pa,&pa,&mv));history_wire_size=14;
     CHECK(append_actual_wire(old,pa,mv,bytes,0)==14);CHECK(bytes[12]==255 && bytes[13]==255);
 }
+/* Reconstruct an old persisted policy to exercise its crash-safe migration machinery. */
+static void legacy_window(void) {
+    retention.limit=3000; retention.gc_sector=oldest_sector;
+    retention_scan_begin(); retention_phase=1; retention_busy=true;
+}
 static void pruning_and_retention(void) {
-    seed(33000);nvs_failures=1;CHECK(retention_request(3000)==0);
+    seed(33000);nvs_failures=1;legacy_window();
     while(retention_phase!=2) retention_work_handler(NULL);
     CHECK(erase_count==0); /* failed metadata commit cannot erase */
     run_gc();verify_window(30000,33000);
@@ -152,7 +169,7 @@ static void pruning_and_retention(void) {
     verify_window(64200,67200); /* cross the physical ring boundary with retention enabled */
 }
 static void interrupted_reclamation(void) {
-    seed(33000);CHECK(retention_request(3000)==0);
+    seed(33000);legacy_window();
     unsigned steps=0;while(erase_count<3 && steps++<1000) retention_work_handler(NULL);
     CHECK(saved_metadata.magic==HISTORY_RETENTION_MAGIC);verify_window(30000,33000);
     retention=saved_metadata;next_sector=retention.head_sector;next_record_in_sector=retention.head_record;oldest_sector=retention.first_sector;
@@ -160,7 +177,7 @@ static void interrupted_reclamation(void) {
     retention_busy=true;retention_phase=2;run_gc();verify_window(30000,33000);
 }
 static void lost_ack_batch_at_sector_boundary(void) {
-    seed(33000);CHECK(retention_request(3000)==0);run_gc();
+    seed(33000);legacy_window();run_gc();
     for(unsigned i=33000;i<33264;i++) {
         ram_buffer[0]=row(i,true);ram_buffer_count=1;storage_write_batch();run_gc();
     }
@@ -219,7 +236,51 @@ static void stale_sector_head_recovery(void) {
     }
 }
 
+static void cancel_retention(void) {
+    seed(33000);legacy_window();run_gc();verify_window(30000,33000);
+    unsigned erases=erase_count;
+    uint8_t preserved[3000*12];
+    for(unsigned i=0;i<3000;i++) memcpy(preserved+i*12,flash_bytes+storage_record_address(30000+i)-W25Q64_STORAGE_BASE,12);
+    CHECK(retention_request(3000)==-EINVAL);
+    CHECK(retention_request(1)==-EINVAL);
+    nvs_failures=1;CHECK(retention_request(0)==0);
+    while(retention_phase!=2) retention_work_handler(NULL);
+    CHECK(erase_count==erases);
+    run_gc();CHECK(retention.limit==HISTORY_RING_CAPACITY);verify_window(30000,33000);
+    for(unsigned i=0;i<3000;i++) CHECK(memcmp(preserved+i*12,flash_bytes+storage_record_address(30000+i)-W25Q64_STORAGE_BASE,12)==0);
+    for(unsigned i=33000;i<33700;i++) {
+        ram_buffer[0]=row(i,true);ram_buffer_count=1;storage_write_batch();run_gc();CHECK(ram_buffer_count==0);
+    }
+    verify_window(30000,33700);CHECK(retention.count>3000);
+    retention=saved_metadata;next_sector=retention.head_sector;next_record_in_sector=retention.head_record;oldest_sector=retention.first_sector;
+    storage_scan_flash_for_write_head(oldest_sector);retention_scan_begin();int r;do{r=retention_scan_step();}while(r==1);CHECK(r==0);
+    verify_window(30000,33700);CHECK(retention.limit==HISTORY_RING_CAPACITY);
+    for(unsigned i=33700;i<100000;i++) {
+        ram_buffer[0]=row(i,true);ram_buffer_count=1;storage_write_batch();run_gc();CHECK(ram_buffer_count==0);
+    }
+    verify_window(100000-HISTORY_RING_CAPACITY,100000);
+}
+
+static void stale_history_completion(void) {
+    history_transfer_epoch=7;bt_connected=true;history_transfer_active=true;history_sending=true;
+#ifdef HAVE_OLD_DISCONNECT_CONTROL
+    old_bt_disconnected_cb(NULL,0);
+    CHECK(history_sending && history_transfer_active && !bt_connected);
+    printf("Old actual disconnect leaves in-flight sending flag set when completion is dropped\n");
+    bt_connected=true;
+#endif
+    current_bt_disconnected_cb(NULL,0);
+    CHECK(!history_transfer_active && !history_sending && history_transfer_epoch==8);
+    history_transfer_active=true;history_sending=true;
+    history_notify_cb(NULL,(void *)(uintptr_t)7);
+    CHECK(history_sending); /* old callback cannot release the new in-flight packet */
+    history_notify_cb(NULL,(void *)(uintptr_t)8);
+    CHECK(!history_sending);
+    history_sending=true;bt_connected=false;history_cancel_transfer();
+    CHECK(!history_transfer_active && !history_sending);
+}
+
 int main(void) {
-    stale_sector_head_recovery();codecs();retention_days();wires();pruning_and_retention();interrupted_reclamation();failed_programs();lost_ack_batch_at_sector_boundary();
+    stale_history_completion();cancel_retention();stale_sector_head_recovery();codecs();retention_days();wires();pruning_and_retention();interrupted_reclamation();failed_programs();lost_ack_batch_at_sector_boundary();
     printf("Production history C fixture: %u failures\n",failures);return failures?1:0;
 }

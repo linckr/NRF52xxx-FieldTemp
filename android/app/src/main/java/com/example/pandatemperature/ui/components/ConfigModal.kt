@@ -65,8 +65,8 @@ fun ConfigModal(
                 errorMessage = "请输入有效的数字"
             }
             interval < BleConstants.HISTORY_INTERVAL_MIN -> {
-                // 下限 60 秒是固件的容量红线：65000×60s ≈ 45 天，低于它无法保证 30 天保留
-                errorMessage = "历史记录间隔不能小于${BleConstants.HISTORY_INTERVAL_MIN}秒（否则无法保证30天保留）"
+                // 最小间隔遵循固件范围，实际保留时间取决于设备有效容量。
+                errorMessage = "历史记录间隔不能小于${BleConstants.HISTORY_INTERVAL_MIN}秒"
             }
             interval > BleConstants.HISTORY_INTERVAL_MAX -> {
                 errorMessage = "历史记录间隔不能大于${BleConstants.HISTORY_INTERVAL_MAX}秒"

@@ -56,6 +56,7 @@ import com.example.pandatemperature.data.weather.HistoryEvaluationResult
 import com.example.pandatemperature.data.weather.WapsResult
 import com.example.pandatemperature.data.weather.WapsMonitor
 import com.example.pandatemperature.data.weather.insights.WeatherInsightsResult
+import com.example.pandatemperature.utils.safeBluetoothDeviceName
 import com.example.pandatemperature.utils.calculateAltitude
 import com.example.pandatemperature.utils.showStormWarningNotification
 import com.example.pandatemperature.utils.evaluateHistorySegment
@@ -245,19 +246,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _taskStatus = MutableStateFlow<TaskStatus?>(null)
     val taskStatus: StateFlow<TaskStatus?> = _taskStatus.asStateFlow()
     
-    private data class RetainedSync(val session: Long, val deviceId: String, val retryAttempt: Int) {
-        var before: ByteArray? = null
-        var after: ByteArray? = null
-        var requestTimestamp = -1L
-        var endReceived = false
-        var savesSucceeded = true
-        val timestamps = mutableSetOf<Long>()
-    }
-    private var retainedSync: RetainedSync? = null
     private var historyFetchDeviceId: String? = null
-    private fun retainedHistoryKey(deviceId: String) = "retain_history_3000_$deviceId"
-    internal fun isPersistentHistoryRetentionEnabled(deviceId: String): Boolean =
-        prefs.getBoolean(retainedHistoryKey(deviceId), false)
     private var historyDataList = mutableListOf<TemperatureRecord>()
     private val historyMutex = Mutex()
     private var isHistorySubscribed = false
@@ -475,7 +464,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         
         addLog("开始扫描设备...", LogType.INFO)
         bleManager.startScan { device ->
-            val name = device.name ?: device.address
+            val name = safeBluetoothDeviceName(getApplication(), device) ?: device.address
             
             // 更新扫描到的设备集合（用于在线状态）
             val currentSet = _scannedDevices.value.toMutableSet()
@@ -521,7 +510,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun saveDevice(device: BluetoothDevice) {
         viewModelScope.launch {
-            val name = device.name ?: "未知设备"
+            val name = safeBluetoothDeviceName(getApplication(), device) ?: "未知设备"
             val existing = deviceDao.getDevice(device.address)
             val newDevice = Device(
                 macAddress = device.address,
@@ -591,7 +580,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             saveDevice(device)
             
             _taskStatus.value = TaskStatus("正在连接中...", 0, 0)
-            addLog("正在连接设备: ${device.name ?: device.address}...", LogType.INFO)
+            addLog("正在连接设备: ${safeBluetoothDeviceName(getApplication(), device) ?: device.address}...", LogType.INFO)
             val success = bleManager.connect(device)
             if (!success) {
                 addLog("连接失败", LogType.ERROR)
@@ -1680,9 +1669,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Explicit module maintenance only. Does not delete or replace the App database. */
-    suspend fun retainLatestDeviceHistory(count: Int): Boolean = withContext(Dispatchers.Main) {
+    suspend fun disableDeviceHistoryRetention(): Boolean = withContext(Dispatchers.Main) {
         val commandDeviceId = deviceAddress.value ?: return@withContext false
-        val request = RetentionRequestBuilder.build(_deviceStatus.value?.capabilityFlags ?: 0, count)
+        val request = RetentionRequestBuilder.buildDisable(_deviceStatus.value?.capabilityFlags ?: 0)
         if (request == null) {
             addLog("设备未声明历史保留能力，未发送维护命令", LogType.ERROR)
             return@withContext false
@@ -1698,28 +1687,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         isMaintainingHistory = true
         try {
+            val initialInfo = CompletableDeferred<ByteArray?>()
+            bleManager.readCharacteristic(BleConstants.HISTORY_INFO_CHAR) { initialInfo.complete(it) }
+            val initialData = withTimeoutOrNull(BLE_READ_TIMEOUT_MS) { initialInfo.await() }
+            if (initialData?.size != 8) return@withContext false
+            val initialCount = ByteBuffer.wrap(initialData).order(ByteOrder.LITTLE_ENDIAN).int.toLong() and 0xFFFFFFFFL
+            if (deviceAddress.value != commandDeviceId || connectionState.value != BleManager.ConnectionState.ServicesDiscovered) return@withContext false
             val written = CompletableDeferred<Boolean>()
             bleManager.writeCharacteristic(BleConstants.HISTORY_CHAR, request, onWrite = { written.complete(it) })
             if (withTimeoutOrNull(BLE_WRITE_TIMEOUT_MS) { written.await() } != true) {
-                addLog("历史保留命令未确认", LogType.ERROR)
+                addLog("取消历史数量限制命令被拒绝或未确认", LogType.ERROR)
                 return@withContext false
             }
             val confirmed = withTimeoutOrNull(120_000L) {
-                while (connectionState.value == BleManager.ConnectionState.ServicesDiscovered) {
+                while (connectionState.value == BleManager.ConnectionState.ServicesDiscovered && deviceAddress.value == commandDeviceId) {
                     val info = CompletableDeferred<ByteArray?>()
                     bleManager.readCharacteristic(BleConstants.HISTORY_INFO_CHAR) { info.complete(it) }
                     val data = withTimeoutOrNull(BLE_WRITE_TIMEOUT_MS) { info.await() }
                     if (data != null && data.size >= 8) {
                         val total = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN).int.toLong() and 0xFFFFFFFFL
                         _historyTotalRecords.value = total
-                        if (total == count.toLong()) {
+                        if (total >= initialCount) {
                             val statusRead = CompletableDeferred<ByteArray?>()
                             bleManager.readCharacteristic(BleConstants.STATUS_CHAR) { statusRead.complete(it) }
                             val statusData = withTimeoutOrNull(BLE_WRITE_TIMEOUT_MS) { statusRead.await() }
                             val status = statusData?.let { DeviceStatusParser().parse(it) }
                             if (status != null) {
                                 _deviceStatus.value = status
-                                if (!status.isDataClearInProgress && status.recordCount == count) {
+                                if (!status.isDataClearInProgress && status.recordCount.toLong() == total && deviceAddress.value == commandDeviceId) {
                                     return@withTimeoutOrNull true
                                 }
                             }
@@ -1729,24 +1724,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 false
             } == true
-            addLog(if (confirmed) "设备已确认保留最新 $count 条历史" else "历史保留结果未确认", if (confirmed) LogType.SUCCESS else LogType.ERROR)
-            if (confirmed && count == 3000) {
-                if (deviceAddress.value != commandDeviceId) return@withContext false
-                val persisted = withContext(Dispatchers.IO) {
-                    prefs.edit().putBoolean(retainedHistoryKey(commandDeviceId), true).commit()
-                }
-                if (!persisted) {
-                    addLog("设备保留已确认，但本地持续策略未持久化", LogType.ERROR)
-                    return@withContext false
-                }
-            }
+            addLog(if (confirmed) "设备已确认取消历史数量限制" else "取消历史数量限制未确认", if (confirmed) LogType.SUCCESS else LogType.ERROR)
             confirmed
         } finally {
             isMaintainingHistory = false
         }
     }
 
-    fun fetchHistory(lastTimestamp: Long = 0, forceFullSync: Boolean = false, retentionRetryAttempt: Int = 0) {
+    fun fetchHistory(lastTimestamp: Long = 0, forceFullSync: Boolean = false) {
         if (isMaintainingHistory) {
             addLog("历史维护正在执行，请稍后同步", LogType.INFO)
             return
@@ -1766,10 +1751,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         
         historyFetchDeviceId = sessionDeviceId
-        retainedSync = if (_deviceStatus.value?.supportsHistoryRetention == true &&
-            isPersistentHistoryRetentionEnabled(sessionDeviceId)) {
-            RetainedSync(fetchSession, sessionDeviceId, retentionRetryAttempt)
-        } else null
         _isFetchingHistory.value = true
         historyFetchJob = viewModelScope.launch {
             try {
@@ -1806,7 +1787,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // 确定发给设备的起始时间戳（仅允许 0 或「该设备 DB 最新一条」）
                 // 全新安装/无本地数据 → 必须发 0 拉全量；有数据 → 发 DB 最新做增量；强制全量重试 → 发 0
                 var timestamp = when {
-                    retainedSync?.session == fetchSession || forceFullSync -> 0L
+                    forceFullSync -> 0L
                     lastTimestamp > 0 -> lastTimestamp
                     else -> getLastHistoryTimestamp(sessionDeviceId)
                 }
@@ -1842,7 +1823,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 
                 // 记录请求的时间戳
                 lastRequestedTimestamp = timestamp
-                retainedSync?.takeIf { it.session == fetchSession }?.requestTimestamp = timestamp
                 
                 // ⭐ 设置任务状态：正在同步历史数据
                 _taskStatus.value = TaskStatus("正在同步历史数据", 0, 0)
@@ -1861,7 +1841,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         if (!historySession.acceptsPackets(fetchSession)) return@readCharacteristic
                         try {
                             if (data != null && data.size >= 8) {
-                                retainedSync?.takeIf { it.session == fetchSession }?.before = data.copyOf()
                                 val infoBuffer = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
                                 val total = infoBuffer.int.toLong() and 0xFFFFFFFFL
                                 val startSector = infoBuffer.short.toInt() and 0xFFFF
@@ -1952,132 +1931,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 
-                // ⭐ 第二步：先停止通知（如果已启动），确保状态清理
-                // ⭐ 根据 Profile 配置选择同步/异步方法
-                if (isHistorySubscribed) {
-                    if (useAsyncNotification) {
-                        // 使用异步方法（支持回调和重试）
-                        try {
-                            val stopDeferred = CompletableDeferred<Boolean>()
-                            bleManager.enableNotificationAsync(
-                                uuid = BleConstants.HISTORY_CHAR,
-                                enable = false,
-                                onNotification = { },
-                                onComplete = { result ->
-                                    stopDeferred.complete(result)
-                                }
-                            )
-                            val stopResult = withTimeoutOrNull(BLE_NOTIFY_TIMEOUT_MS) {
-                                stopDeferred.await()
-                            }
-                            if (stopResult != null) {
-                                addLog("已停止历史数据通知（清理状态）", LogType.INFO)
-                            } else {
-                                addLog("停止通知超时，继续尝试", LogType.INFO)
-                            }
-                        } catch (e: Exception) {
-                            addLog("停止通知时出错（可忽略）: ${e.message}", LogType.INFO)
-                        }
-                    } else {
-                        // 使用同步方法（兼容性更好）
-                        bleManager.enableNotification(BleConstants.HISTORY_CHAR, false) { }
-                        addLog("已停止历史数据通知（清理状态）", LogType.INFO)
-                    }
-                    kotlinx.coroutines.delay(200)
-                    if (!historySession.acceptsPackets(fetchSession)) return@launch
-                    isHistorySubscribed = false
-                }
-                
-                // Profile pairs the parser with its explicit request: V3 adds 0x03.
-                val timestampBytes = currentDeviceProfile?.buildHistoryRequest(timestamp)
-                    ?: run {
-                        addLog("设备配置未就绪，停止获取历史数据", LogType.ERROR)
-                        finishHistoryFetch(fetchSession)
-                        return@launch
-                    }
-                
-                // 使用 CompletableDeferred 等待写入完成
-                val writeDeferred = CompletableDeferred<Boolean>()
-                bleManager.writeCharacteristic(
-                    uuid = BleConstants.HISTORY_CHAR,
-                    value = timestampBytes,
-                    onWrite = { success ->
-                        writeDeferred.complete(success)
-                    }
-                )
-                
-                // 等待写入完成（带超时）
-                val writeSuccess = withTimeoutOrNull(BLE_WRITE_TIMEOUT_MS) {
-                    writeDeferred.await()
-                } ?: false
-                if (!historySession.acceptsPackets(fetchSession)) return@launch
-                if (!writeSuccess) {
-                    addLog("写入时间戳失败或超时，停止获取历史数据", LogType.ERROR)
+                val timestampBytes = profile?.buildHistoryRequest(timestamp) ?: run {
+                    addLog("设备配置未就绪，停止获取历史数据", LogType.ERROR)
                     finishHistoryFetch(fetchSession)
                     return@launch
                 }
-                
-                if (timestamp > 0) {
-                    addLog("已设置起始时间戳为 $timestamp（增量更新，获取此时间之后的数据）", LogType.INFO)
-                } else {
-                    addLog("已设置起始时间戳为0（发送全部数据）", LogType.INFO)
-                }
-                
-                // ⭐ 增加延迟，确保时间戳写入操作在单片机端完全处理完毕
-                kotlinx.coroutines.delay(500)
-                
-                if (!historySession.acceptsPackets(fetchSession)) return@launch
-                // ⭐ 第四步：订阅历史数据（重新启动通知，触发单片机端重新开始传输）
-                // ⭐ 根据 Profile 配置选择同步/异步方法
-                var success = false
-                
-                if (useAsyncNotification) {
-                    // 使用异步方法（支持回调和重试）
-                    var retryCount = 0
-                    val maxRetries = 3
-                    
-                    kotlinx.coroutines.delay(100)
-                    
-                    while (retryCount < maxRetries && !success) {
-                        if (retryCount > 0) {
-                            addLog("启动历史数据通知重试中... (${retryCount}/${maxRetries})", LogType.INFO)
-                            kotlinx.coroutines.delay(200)
+                // Local reset flags do not establish remote CCCD state. Require a real disable ACK first.
+                val success = HistoryNotificationSequence.start(
+                    ownsSession = { historySession.acceptsPackets(fetchSession) && deviceAddress.value == sessionDeviceId },
+                    disable = { setHistoryNotificationConfirmed(fetchSession, false) },
+                    writeRequest = {
+                        val written = CompletableDeferred<Boolean>()
+                        bleManager.writeCharacteristic(BleConstants.HISTORY_CHAR, timestampBytes, onWrite = { written.complete(it) })
+                        withTimeoutOrNull(BLE_WRITE_TIMEOUT_MS) { written.await() } == true
+                    },
+                    enable = {
+                        var enabled = false
+                        var attempts = 0
+                        while (!enabled && attempts < 3 && historySession.acceptsPackets(fetchSession)) {
+                            enabled = setHistoryNotificationConfirmed(fetchSession, true)
+                            attempts++
+                            if (!enabled && attempts < 3) delay(200)
                         }
-                        
-                        if (!historySession.acceptsPackets(fetchSession)) return@launch
-                        val deferred = CompletableDeferred<Boolean>()
-                        bleManager.enableNotificationAsync(
-                            uuid = BleConstants.HISTORY_CHAR,
-                            enable = true,
-                            onNotification = { data ->
-                                if (historySession.acceptsPackets(fetchSession)) historyPacketChannel.trySend(data)
-                            },
-                            onComplete = { result ->
-                                deferred.complete(result)
-                            }
-                        )
-                        
-                        val result = withTimeoutOrNull(BLE_NOTIFY_TIMEOUT_MS) {
-                            deferred.await()
-                        }
-                        if (!historySession.acceptsPackets(fetchSession)) return@launch
-                        success = result == true
-                        if (!success) {
-                            if (result == null) {
-                                addLog("启动通知超时，重试中...", LogType.INFO)
-                            }
-                            retryCount++
-                        } else {
-                            kotlinx.coroutines.delay(100)
-                        }
+                        enabled
                     }
-                } else {
-                    // 使用同步方法（兼容性更好）
-                    success = bleManager.enableNotification(BleConstants.HISTORY_CHAR, true) { data ->
-                        if (historySession.acceptsPackets(fetchSession)) historyPacketChannel.trySend(data)
-                    }
-                }
-                
+                )
                 if (!historySession.acceptsPackets(fetchSession)) return@launch
                 if (success) {
                     isHistorySubscribed = true
@@ -2119,6 +1997,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * 启动历史数据消费者协程
      */
+    private suspend fun setHistoryNotificationConfirmed(fetchSession: Long, enable: Boolean): Boolean {
+        if (!historySession.acceptsPackets(fetchSession)) return false
+        val completed = CompletableDeferred<Boolean>()
+        bleManager.enableNotificationAsync(BleConstants.HISTORY_CHAR, enable,
+            onNotification = { data ->
+                if (enable && historySession.acceptsPackets(fetchSession)) historyPacketChannel.trySend(data)
+            }, onComplete = { completed.complete(it) })
+        val confirmed = withTimeoutOrNull(BLE_NOTIFY_TIMEOUT_MS) { completed.await() } == true
+        if (!enable && confirmed) isHistorySubscribed = false
+        return confirmed && historySession.acceptsPackets(fetchSession)
+    }
+
     private fun startHistoryConsumer(fetchSession: Long) {
         historyProcessingJob?.cancel()
         // ⭐ 使用 Channel.UNLIMITED 确保通道有足够缓冲区
@@ -2168,13 +2058,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         try {
             // 检查结束标志
             if (data.size == 1 && data[0] == BleConstants.HISTORY_END_FLAG) {
-                val retained = retainedSync?.takeIf { it.session == fetchSession }
-                if (retained != null) {
-                    retained.endReceived = true
-                    val pendingInfo = CompletableDeferred<ByteArray?>()
-                    bleManager.readCharacteristic(BleConstants.HISTORY_INFO_CHAR) { pendingInfo.complete(it?.copyOf()) }
-                    retained.after = withTimeoutOrNull(BLE_READ_TIMEOUT_MS) { pendingInfo.await() }
-                }
                 val total = expectedHistoryTotal
                 val received = totalHistoryReceivedCount
                 
@@ -2219,7 +2102,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // 使用本次同步捕获的连接设备，避免查看其他设备时串写记录。
             val deviceId = historyFetchDeviceId ?: return
             if (deviceAddress.value != deviceId) {
-                retainedSync?.takeIf { it.session == fetchSession }?.savesSucceeded = false
                 return
             }
             val parser = currentDeviceProfile?.getHistoryParser(deviceId) ?: run {
@@ -2239,12 +2121,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             
             if (newRecords.isNullOrEmpty()) return
             if (newRecords.any { it.deviceId != deviceId }) {
-                retainedSync?.takeIf { it.session == fetchSession }?.savesSucceeded = false
                 return
             }
             
             if (!historySession.acceptsPackets(fetchSession)) return
-            retainedSync?.takeIf { it.session == fetchSession }?.timestamps?.addAll(newRecords.map { it.timestamp })
             var currentBufferSize = 0
             historyMutex.withLock {
                 historyDataList.addAll(newRecords)
@@ -2336,10 +2216,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         retryFullSync: Boolean = false
     ) {
         if (!historySession.beginFinish(fetchSession)) return
-        val retainedAtFinish = retainedSync?.takeIf { it.session == fetchSession }
         historyFinishJob = viewModelScope.launch {
             // ⭐ 根据 Profile 配置选择同步/异步方法（提前获取，供 try 和 catch 使用）
-            var retryRetained = false
             val useAsyncNotification = currentDeviceProfile?.useAsyncNotificationForHistory ?: false
             
             try {
@@ -2352,29 +2230,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 saveHistoryToDatabase(clearAfterSave = true)
                 currentCoroutineContext().ensureActive()
                 if (!historySession.owns(fetchSession)) return@launch
-                val retained = retainedAtFinish
-                if (retained != null) {
-                    val eligible = HistoryRetentionGate.canTrim(retained.requestTimestamp, retained.endReceived,
-                        recordsReceivedInSession, retained.timestamps, retained.before, retained.after,
-                        retained.savesSucceeded, historySession.owns(fetchSession) &&
-                            deviceAddress.value == retained.deviceId &&
-                            connectionState.value == BleManager.ConnectionState.ServicesDiscovered)
-                    if (eligible) {
-                        withContext(Dispatchers.IO) {
-                            currentCoroutineContext().ensureActive()
-                            if (historySession.owns(fetchSession) && deviceAddress.value == retained.deviceId) {
-                                val removed = recordDao.trimHistoryToWireSet(retained.deviceId, retained.timestamps.toSet()) {
-                                    historySession.owns(fetchSession) && deviceAddress.value == retained.deviceId &&
-                                        connectionState.value == BleManager.ConnectionState.ServicesDiscovered
-                                }
-                                addLog("本地持续保留已核对3000条，移除${removed}条窗口外模块历史", LogType.SUCCESS)
-                            }
-                        }
-                    } else {
-                        addLog("保留窗口未通过完整END/3000唯一记录/稳定信息/保存验证，本地记录未删除", LogType.ERROR)
-                        retryRetained = retained.retryAttempt == 0
-                    }
-                }
                 // ⭐ 历史同步完成后写一笔明确标记来源的手机实时数据（GPS可缺失），衔接时间线
                 val location = if (_hasLocationPermission.value) {
                     locationManager.getCachedLocation() ?: locationManager.getCurrentLocation(5000)
@@ -2488,11 +2343,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 if (historySession.complete(fetchSession)) {
                     _isFetchingHistory.value = false
-                    if (retainedAtFinish != null) {
-                        if ((retryFullSync || retryRetained) && retainedAtFinish.retryAttempt < 1) {
-                            fetchHistory(forceFullSync = true, retentionRetryAttempt = retainedAtFinish.retryAttempt + 1)
-                        }
-                    } else if (retryFullSync) fetchHistory(forceFullSync = true)
+                    if (retryFullSync) fetchHistory(forceFullSync = true)
                 }
             }
         }
@@ -2514,7 +2365,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
-            retainedSync?.savesSucceeded = false
             addLog("保存历史数据到数据库失败: ${e.message}", LogType.ERROR)
         }
     }

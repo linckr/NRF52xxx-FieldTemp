@@ -11,6 +11,7 @@ parser.add_argument("--cc", required=True)
 parser.add_argument("--work-dir", type=Path)
 parser.add_argument("--compare-old-head", action="store_true", help="Also compile the specified immutable old scan as regression control")
 parser.add_argument("--old-head-ref", default="1231ad7b5f9e19993c86b72468b7dda70e4793e1", help="Old implementation commit/ref for --compare-old-head")
+parser.add_argument("--old-disconnect-ref", default="9fa03142f1aa7b06aacc5d486fde8bf8d8aae68a", help="Immutable deployed-v9 disconnect control for --compare-old-head")
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[1]
 main = (root / "src/main.c").read_text(encoding="utf-8")
@@ -33,7 +34,7 @@ position_start = nvs.index("typedef struct {", nvs.index("/* 存储位置上下�
 position_end = nvs.index("} storage_position_t;", position_start) + len("} storage_position_t;")
 types = geometry + "\n#define W25Q64_STORAGE_BASE 0x2e000U\n#define RAM_BUFFER_SIZE 5\n" + record + "\n" + nvs[retention_start:retention_end] + "\n" + nvs[position_start:position_end]
 retention_code = main[main.index("/* A separate atomic NVS checkpoint"):main.index("// 配置数据结构已移至", main.index("/* A separate atomic NVS checkpoint"))]
-under_test = function("static uint32_t storage_physical_count(void)") + "\n" + retention_code + "\n" + function("static void storage_keep_unwritten(") + "\n" + function("static void storage_write_batch(void)\n{") + "\n" + function("static void storage_scan_flash_for_write_head(") + "\n" + function("static bool linear_find_first_after_timestamp(") + "\n" + function("static uint16_t history_retention_days(void)")
+under_test = "static void history_cancel_transfer(void);\n" + function("static void bt_disconnected_cb(").replace("bt_disconnected_cb", "current_bt_disconnected_cb", 1) + "\n" + function("static void history_cancel_transfer(void)") + "\n" + function("static void history_notify_cb(") + "\n" + function("static uint32_t storage_physical_count(void)") + "\n" + retention_code + "\n" + function("static void storage_keep_unwritten(") + "\n" + function("static void storage_write_batch(void)\n{") + "\n" + function("static void storage_scan_flash_for_write_head(") + "\n" + function("static bool linear_find_first_after_timestamp(") + "\n" + function("static uint16_t history_retention_days(void)")
 if args.compare_old_head:
     old = subprocess.run(["git", "-C", str(root), "show", f"{args.old_head_ref}:src/main.c"], check=True, capture_output=True, encoding="utf-8").stdout
     name = "static void storage_scan_flash_for_write_head("
@@ -41,6 +42,12 @@ if args.compare_old_head:
     end = old.index("\n}", start) + 2
     old_function = old[start:end].replace("storage_scan_flash_for_write_head", "old_storage_scan_flash_for_write_head")
     under_test += "\n#define HAVE_OLD_SCAN_CONTROL 1\n" + old_function + "\n"
+    old_disconnect_source = subprocess.run(["git", "-C", str(root), "show", f"{args.old_disconnect_ref}:src/main.c"], check=True, capture_output=True, encoding="utf-8").stdout
+    old_start = old_disconnect_source.index("static void bt_disconnected_cb(")
+    old_end = old_disconnect_source.index("\n}", old_start) + 2
+    old_disconnect = old_disconnect_source[old_start:old_end].replace("bt_disconnected_cb", "old_bt_disconnected_cb", 1)
+    under_test += "\n#define HAVE_OLD_DISCONNECT_CONTROL 1\n" + old_disconnect + "\n"
+
 wire_start = main.index("        rec.pressure_pa = decoded_pressure;")
 wire_end = main.index("        tx_len += history_wire_size;", wire_start) + len("        tx_len += history_wire_size;")
 wire = "static uint8_t append_actual_wire(struct data_record rec, uint32_t decoded_pressure, uint16_t decoded_voltage, uint8_t *tx_buf, uint8_t tx_len) {\n" + main[wire_start:wire_end] + "\nreturn tx_len;\n}\n"
