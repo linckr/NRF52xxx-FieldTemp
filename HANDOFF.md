@@ -4,7 +4,7 @@
 
 ## 当前基线
 
-开发候选 Firmware1.0.12+0、App1.1.5/code7、Room12；正式发布与设备固件仍为1.0.11。新固件尚未真机验收；主仓库`D:\下载\PandaTemperature`，App在`android/`。origin为linckr/NRF52xxx-FieldTemp，upstream为yodfz/NRF52xxx-FieldTemp。HEAD及PR是否合并必须实时查询，不把历史PR状态当当前结论。
+开发候选与测试设备 Firmware1.0.12+0、App1.1.5/code7、Room12；正式发布仍为1.0.11。正常生产OTA、首次启动5条离线校时及受控跨启动隔离已通过；诊断负载测得BLE RX栈余88 B，构成发布阻塞，见[最新实测](docs/20261016-生产OTA与离线校时实测.md)。主仓库`D:\下载\PandaTemperature`，App在`android/`。origin为linckr/NRF52xxx-FieldTemp，upstream为yodfz/NRF52xxx-FieldTemp。HEAD及PR是否合并必须实时查询，不把历史PR状态当当前结论。
 
 正式1.0.11签名镜像SHA256：`47760eb524598918ce5aefaf10060b65c2ccfe57e70b1c282bbf692f5d18bd43`；App1.1.4生产APK SHA256：`488bc447c9bc602abf4f005058a367fb4228b1a82a621f61b2fb2c41a991958c`。
 

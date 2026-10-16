@@ -100,7 +100,8 @@ class RawHistoryCaptureTest {
             val profile = DeviceProfileFactory.createThermometerProfile(beforeStatus.firmwareVersion, capabilityFlags = beforeStatus.capabilityFlags)
             assertEquals(14, (profile.getHistoryParser("capture-only") as HistoryFormatAware).historyRecordSize)
             val request = profile.buildHistoryRequest(0)
-            assertArrayEquals(byteArrayOf(0, 0, 0, 0, 3), request)
+            val requestOpcode = if (beforeStatus.firmwareVersion >= 12) 5 else 3
+            assertArrayEquals(byteArrayOf(0, 0, 0, 0, requestOpcode.toByte()), request)
             val written = CompletableDeferred<Boolean>()
             manager.writeCharacteristic(BleConstants.HISTORY_CHAR, request, onWrite = { written.complete(it) })
             assertTrue("V3 request write failed", withTimeoutOrNull(5_000L) { written.await() } == true)

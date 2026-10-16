@@ -9,8 +9,8 @@
     未使用字节数 = 从栈底向上连续 0xAA 的字节数
     峰值使用量   = 栈对象大小 - 未使用字节数
 
-这才是"RAM 还够不够"的真正安全判据 —— 只看静态占用率（如 80%）无法回答
-"某个线程的栈会不会溢出"。
+该方法给出已执行负载下的栈峰值，不能穷尽未运行路径，也不能单独证明内存安全。
+静态占用率不能回答某个线程的栈余量。
 
 关于 idle 栈
 -----------
@@ -31,7 +31,7 @@
     # 1) 构建测量镜像（不要用发布镜像，发布镜像没有 INIT_STACKS）
     #    west build ... -- -DCONFIG_INIT_STACKS=y
     # 2) 让设备在真实负载下跑一段时间（BLE 已连接、历史写入、NVS flush）
-    # 3) 只读测量（attach，不复位，保留栈现场）
+    # 3) attach后短暂停核读栈并恢复，不复位；测量期间存在采样中断
     python tools/stack_hwm.py --elf <build>/NRF52xxx-FieldTemp/zephyr/zephyr.elf \
                               --config <build>/NRF52xxx-FieldTemp/zephyr/.config
 
@@ -139,7 +139,9 @@ def read_config_bool(path, key):
 def connect(probe, target, freq):
     from pyocd.core.helpers import ConnectHelper
     session = ConnectHelper.session_with_chosen_probe(
-        unique_id=probe, target_override=target, frequency=freq)
+        blocking=False, unique_id=probe, target_override=target, frequency=freq,
+        options={"connect_mode": "attach", "halt_on_connect": False,
+                 "auto_unlock": False, "resume_on_disconnect": False})
     if session is None:
         sys.exit("未找到调试器 %s" % probe)
     return session
@@ -173,6 +175,21 @@ def measure(target, stacks, guard):
             "lowest_addr_touched": base + scan_from + untouched,
         })
     return results
+
+
+def measure_running_target(target, stacks, guard):
+    """Refuse a preexisting halt; resume our own halt even if a stack read fails."""
+    from pyocd.core.target import Target
+    if target.get_state() not in (Target.State.RUNNING, Target.State.SLEEPING):
+        raise RuntimeError("目标不是正常运行状态；保留现场，不自动恢复或复位")
+    halted = False
+    try:
+        target.halt()
+        halted = True
+        return measure(target, stacks, guard)
+    finally:
+        if halted:
+            target.resume()
 
 
 def main():
@@ -233,11 +250,7 @@ def main():
     session = connect(args.probe, args.target, args.freq)
     with session:
         target = session.target
-        # 读取前先 halt：目标可能处于 System ON 睡眠，且 halt 能保证读取一致性。
-        # halt 不会改变栈内容（只是停止取指），因此栈现场完好。
-        target.halt()
-        results = measure(target, stacks, guard)
-        target.resume()
+        results = measure_running_target(target, stacks, guard)
 
     ignored = set(n for n in (args.ignore or "").split(",") if n)
     judged = [r for r in results if r["name"] not in ignored]
