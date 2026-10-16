@@ -109,7 +109,7 @@ class BleManager private constructor(private val context: Context) {
                     Log.d(TAG, "设备已连接")
                     _connectionState.value = ConnectionState.Connected
                     // 发现服务
-                    gatt.discoverServices()
+                    bluetoothCall(false) { gatt.discoverServices() }
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     Log.d(TAG, "设备已断开")
@@ -213,7 +213,7 @@ class BleManager private constructor(private val context: Context) {
         }
 
         mtuCallback = onComplete
-        if (gatt?.requestMtu(mtu) != true) {
+        if (!bluetoothCall(false) { gatt?.requestMtu(mtu) == true }) {
             Log.e(TAG, "请求 MTU 失败")
             mtuCallback = null
             onComplete(false, 0)
@@ -252,13 +252,20 @@ class BleManager private constructor(private val context: Context) {
      * 检查蓝牙是否可用
      */
     fun isBluetoothAvailable(): Boolean {
-        return bluetoothAdapter?.isEnabled == true
+        return bluetoothCall(false) { bluetoothAdapter?.isEnabled == true }
     }
     
     /**
      * 开始扫描设备
      * 扫描所有以 "Panda" 开头的蓝牙设备
      */
+    private fun <T> bluetoothCall(fallback: T, action: () -> T): T = try {
+        action()
+    } catch (_: SecurityException) {
+        Log.w(TAG, "Bluetooth permission unavailable; operation was not completed")
+        fallback
+    }
+
     fun startScan(onDeviceFound: (BluetoothDevice) -> Unit) {
         if (!isBluetoothAvailable()) {
             Log.e(TAG, "蓝牙未启用")
@@ -277,7 +284,7 @@ class BleManager private constructor(private val context: Context) {
         val callback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 val device = result.device
-                val name = device.name ?: result.scanRecord?.deviceName
+                val name = bluetoothCall<String?>(null) { device.name } ?: result.scanRecord?.deviceName
                 
                 // 只接受以 "Panda" 开头的设备
                 if (name?.startsWith(BleConstants.DEVICE_NAME_PREFIX_PANDA) == true) {
@@ -311,7 +318,7 @@ class BleManager private constructor(private val context: Context) {
      */
     fun stopScan() {
         if (isScanning && scanCallbackInstance != null) {
-            bluetoothLeScanner?.stopScan(scanCallbackInstance)
+            bluetoothCall(Unit) { bluetoothLeScanner?.stopScan(scanCallbackInstance); Unit }
             isScanning = false
             scanCallbackInstance = null
             Log.d(TAG, "停止扫描")
@@ -328,7 +335,7 @@ class BleManager private constructor(private val context: Context) {
         }
         
         _connectionState.value = ConnectionState.Connecting
-        _deviceName.value = device.name ?: device.address
+        _deviceName.value = bluetoothCall<String?>(null) { device.name } ?: device.address
         _deviceAddress.value = device.address
         currentDevice = device
         
@@ -351,7 +358,7 @@ class BleManager private constructor(private val context: Context) {
      * 通过地址连接设备
      */
     fun connect(address: String): Boolean {
-        val device = bluetoothAdapter?.getRemoteDevice(address)
+        val device = bluetoothCall<BluetoothDevice?>(null) { bluetoothAdapter?.getRemoteDevice(address) }
         return if (device != null) {
             connect(device)
         } else {
@@ -364,8 +371,8 @@ class BleManager private constructor(private val context: Context) {
      * 断开连接
      */
     fun disconnect() {
-        gatt?.disconnect()
-        gatt?.close()
+        bluetoothCall(Unit) { gatt?.disconnect(); Unit }
+        bluetoothCall(Unit) { gatt?.close(); Unit }
         cleanup()
         _connectionState.value = ConnectionState.Disconnected
         _deviceName.value = null
@@ -433,7 +440,7 @@ class BleManager private constructor(private val context: Context) {
         val uuidObj = UUID.fromString(uuid)
         readCallbacks[uuidObj] = onRead
         
-        if (gatt?.readCharacteristic(characteristic) == true) {
+        if (bluetoothCall(false) { gatt?.readCharacteristic(characteristic) == true }) {
             Log.d(TAG, "读取特征: $uuid")
         } else {
             Log.e(TAG, "读取特征失败: $uuid")
@@ -448,6 +455,10 @@ class BleManager private constructor(private val context: Context) {
     fun isCharacteristicAvailable(uuid: String): Boolean {
         return getCharacteristicByUuid(uuid) != null
     }
+
+    fun isCharacteristicReadable(uuid: String): Boolean =
+        getCharacteristicByUuid(uuid)?.properties?.and(BluetoothGattCharacteristic.PROPERTY_READ) != 0 &&
+            getCharacteristicByUuid(uuid) != null
     
     /**
      * 写入特征值（同步方式，立即返回）
@@ -461,7 +472,7 @@ class BleManager private constructor(private val context: Context) {
         characteristic.value = value
         characteristic.writeType = writeType
         
-        return gatt?.writeCharacteristic(characteristic) == true
+        return bluetoothCall(false) { gatt?.writeCharacteristic(characteristic) == true }
     }
     
     /**
@@ -480,7 +491,7 @@ class BleManager private constructor(private val context: Context) {
         characteristic.value = value
         characteristic.writeType = writeType
         
-        if (gatt?.writeCharacteristic(characteristic) != true) {
+        if (!bluetoothCall(false) { gatt?.writeCharacteristic(characteristic) == true }) {
             Log.e(TAG, "写入特征失败: $uuid")
             writeCallbacks.remove(uuidObj)
             onWrite(false)
@@ -508,7 +519,7 @@ class BleManager private constructor(private val context: Context) {
         }
         
         // 启用/禁用本地通知
-        if (gatt?.setCharacteristicNotification(characteristic, enable) != true) {
+        if (!bluetoothCall(false) { gatt?.setCharacteristicNotification(characteristic, enable) == true }) {
             Log.e(TAG, "设置通知失败")
             if (enable) {
                 notificationCallbacks.remove(uuidObj)
@@ -533,7 +544,7 @@ class BleManager private constructor(private val context: Context) {
         }
         
         descriptor.value = value
-        if (gatt?.writeDescriptor(descriptor) != true) {
+        if (!bluetoothCall(false) { gatt?.writeDescriptor(descriptor) == true }) {
             Log.e(TAG, "写入描述符失败")
             if (enable) {
                 notificationCallbacks.remove(uuidObj)
@@ -575,7 +586,7 @@ class BleManager private constructor(private val context: Context) {
         }
         
         // 启用/禁用本地通知
-        if (gatt?.setCharacteristicNotification(characteristic, enable) != true) {
+        if (!bluetoothCall(false) { gatt?.setCharacteristicNotification(characteristic, enable) == true }) {
             Log.e(TAG, "设置通知失败")
             if (enable) {
                 notificationCallbacks.remove(uuidObj)
@@ -620,7 +631,7 @@ class BleManager private constructor(private val context: Context) {
             }
         }
         
-        if (gatt?.writeDescriptor(descriptor) != true) {
+        if (!bluetoothCall(false) { gatt?.writeDescriptor(descriptor) == true }) {
             Log.e(TAG, "写入描述符失败")
             descriptorWriteCallbacks.remove(uuidObj)
             if (enable) {

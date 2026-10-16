@@ -68,5 +68,19 @@ data class TemperatureRecord(
 
     /** Phone realtime sample, including samples without GPS. Legacy unknown rows remain false. */
     @ColumnInfo(defaultValue = "0")
-    val isPhoneSample: Boolean = false
+    val isPhoneSample: Boolean = false,
+
+    /** Original device relative ID, retained even after timestamp correction. */
+    val rawTimestamp: Long? = null,
+    @ColumnInfo(defaultValue = "0")
+    val timeUncertain: Boolean = false
 ) : HistoryRecord
+
+enum class RecordTimeQuality { SYNCED, RECONSTRUCTED, UNKNOWN }
+
+val TemperatureRecord.timeQuality: RecordTimeQuality
+    get() = when {
+        timeUncertain -> RecordTimeQuality.UNKNOWN
+        rawTimestamp != null -> RecordTimeQuality.RECONSTRUCTED
+        else -> RecordTimeQuality.SYNCED
+    }

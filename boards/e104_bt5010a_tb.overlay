@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
+/* Reference only; current release uses nrf52dk/nrf52810 + app.overlay. */
 /* E104-BT5010A (nRF52810) 板级 overlay：W25Q64 使用 SPI0，引脚 30/31/29，CS 28 */
 
 / {

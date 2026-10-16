@@ -45,7 +45,8 @@ interface HistoryFormatAware {
  */
 class HistoryDataParser(
     private val deviceId: String,
-    private val format: HistoryRecordFormat = HistoryRecordFormat.V2
+    private val format: HistoryRecordFormat = HistoryRecordFormat.V2,
+    private val supportsRelativeTime: Boolean = false
 ) : DataParser<List<TemperatureRecord>>, HistoryFormatAware {
 
     override val historyFormatName: String = format.name
@@ -117,7 +118,9 @@ class HistoryDataParser(
                 humidity = humidity,
                 pressure = pressure,
                 batteryVoltage = batteryVoltage,
-                deviceId = deviceId
+                deviceId = deviceId,
+                rawTimestamp = timestamp.takeIf { supportsRelativeTime && it in 1 until OfflineClockMetadata.UNIX_MIN },
+                timeUncertain = supportsRelativeTime && timestamp in 1 until OfflineClockMetadata.UNIX_MIN
             )
         } catch (_: Exception) {
             null

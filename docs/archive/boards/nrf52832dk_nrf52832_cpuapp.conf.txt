@@ -1,0 +1,2 @@
+# nRF52832 上 W25Q64 使用 SPI1，显式启用 SPI 实例 1
+CONFIG_SPI_1=y

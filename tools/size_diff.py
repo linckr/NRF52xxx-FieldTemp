@@ -7,11 +7,11 @@ import os
 import re
 import subprocess
 import sys
+from size_summary import resolve_app_build_dir
 
 NM = ("C:/ncs/toolchains/66cdf9b75e/opt/zephyr-sdk/"
       "arm-zephyr-eabi/bin/arm-zephyr-eabi-nm.exe")
 SRAM_LO, SRAM_HI = 0x20000000, 0x20006000
-ZEPHYR = "NRF52xxx-FieldTemp/zephyr"
 
 
 def elf_footprint(path):
@@ -52,9 +52,11 @@ def total_size(syms):
 
 
 def main(base, new):
-    base_dir, new_dir = os.path.join(base, ZEPHYR), os.path.join(new, ZEPHYR)
+    base_app, _ = resolve_app_build_dir(base)
+    new_app, _ = resolve_app_build_dir(new)
+    base_dir, new_dir = os.path.join(base_app, "zephyr"), os.path.join(new_app, "zephyr")
     b_rom = os.path.getsize(os.path.join(base_dir, "zephyr.bin"))
-    n_rom = os.path.getsize(os.path.join(base_dir and new_dir, "zephyr.bin"))
+    n_rom = os.path.getsize(os.path.join(new_dir, "zephyr.bin"))
     _, b_ram = elf_footprint(os.path.join(base_dir, "zephyr.elf"))
     _, n_ram = elf_footprint(os.path.join(new_dir, "zephyr.elf"))
 

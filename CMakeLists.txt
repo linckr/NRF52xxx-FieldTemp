@@ -18,6 +18,7 @@ target_sources(app PRIVATE
 target_sources(app PRIVATE 
     src/storage/w25q64.c
     src/storage/nvs_config.c
+    src/storage/offline_clock.c
 )
 
 # 蓝牙模块
@@ -30,7 +31,7 @@ target_sources(app PRIVATE
 # LED模块
 target_sources(app PRIVATE src/led.c)
 
-# 电池电压采样（仅 CONFIG_ADC=y 时产生代码，默认关闭 → 对发布镜像零影响）
+# 电池电压采样（当前发布 CONFIG_ADC=y；实际包含 SAADC 驱动与测量代码）
 target_sources(app PRIVATE src/vdd.c)
 
 # 添加包含目录

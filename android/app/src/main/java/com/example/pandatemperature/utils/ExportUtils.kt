@@ -27,18 +27,18 @@ object ExportUtils {
         
         FileWriter(file).use { writer ->
             // Header
-            writer.append("Time,Temperature(°C),Humidity(%),Pressure(hPa),Latitude,Longitude\n")
+            writer.append("Time,Temperature(°C),Humidity(%),Pressure(hPa),Latitude,Longitude,RawRelativeId,TimeStatus\n")
             
             // Data
             for (record in records) {
-                val time = dateFormat.format(Date(record.timestamp * 1000))
+                val time = if (record.timeUncertain) "时间未确定" else dateFormat.format(Date(record.timestamp * 1000))
                 val temp = String.format("%.2f", record.temperature)
                 val hum = String.format("%.2f", record.humidity)
                 val press = record.pressure?.let { String.format("%.2f", it) } ?: ""
                 val lat = record.latitude?.toString() ?: ""
                 val lon = record.longitude?.toString() ?: ""
                 
-                writer.append("$time,$temp,$hum,$press,$lat,$lon\n")
+                writer.append("$time,$temp,$hum,$press,$lat,$lon,${record.rawTimestamp ?: ""},${if (record.timeUncertain) "unknown" else if (record.rawTimestamp != null) "reconstructed" else "synced"}\n")
             }
         }
         return file
@@ -67,8 +67,8 @@ object ExportUtils {
         val lineHeight = 20f
         
         if (records.isNotEmpty()) {
-            val startTime = dateFormat.format(Date(records.first().timestamp * 1000))
-            val endTime = dateFormat.format(Date(records.last().timestamp * 1000))
+            val startTime = if (records.first().timeUncertain) "时间未确定" else dateFormat.format(Date(records.first().timestamp * 1000))
+            val endTime = if (records.last().timeUncertain) "时间未确定" else dateFormat.format(Date(records.last().timestamp * 1000))
             val count = records.size
             
             // Calculate stats
@@ -162,7 +162,7 @@ object ExportUtils {
                 break
             }
             
-            val time = dateFormat.format(Date(record.timestamp * 1000))
+            val time = if (record.timeUncertain) "时间未确定" else dateFormat.format(Date(record.timestamp * 1000))
             val temp = String.format("%.2f", record.temperature)
             val hum = String.format("%.2f", record.humidity)
             val press = record.pressure?.let { String.format("%.2f", it) } ?: "-"

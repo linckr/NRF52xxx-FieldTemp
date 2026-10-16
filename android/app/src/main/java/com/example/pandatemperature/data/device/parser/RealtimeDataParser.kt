@@ -66,6 +66,8 @@ class RealtimeDataParserV2 : DataParser<ThermometerData> {
             val humRaw = buffer.short.toInt() and 0xFFFF
             // pressure: uint16, 单位 0.1 hPa
             val pressureRaw = buffer.short.toInt() and 0xFFFF
+            // Older firmware exposes its zero-initialized buffer before the first sample.
+            if (tempRaw.toInt() == 0 && humRaw == 0 && pressureRaw == 0) return null
 
             // battery voltage: optional uint16 little-endian, unit: mV.
             // Keep the existing 6-byte v1/v2 packet fully compatible.
@@ -91,9 +93,9 @@ class RealtimeDataParserV2 : DataParser<ThermometerData> {
             }
             
             ThermometerData(
-                temperature = tempRaw / 100.0f,
-                humidity = humRaw / 100.0f,
-                pressure = pressureRaw / 10.0f,
+                temperature = (tempRaw / 100.0f).takeIf { tempRaw.toInt() in -5000..15000 },
+                humidity = (humRaw / 100.0f).takeIf { humRaw <= 10000 },
+                pressure = (pressureRaw / 10.0f).takeIf { pressureRaw in 1000..20000 },
                 batteryVoltage = batteryVoltage,
                 batteryVoltageReported = voltageReported
             )

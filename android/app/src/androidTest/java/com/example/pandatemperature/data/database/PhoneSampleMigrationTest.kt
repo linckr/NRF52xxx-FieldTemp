@@ -13,7 +13,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** A real SQLite v10 file opened through Room v11; never opens the user's database. */
+/** A real SQLite v10 file opened through Room v12; never opens the user's database. */
 @RunWith(AndroidJUnit4::class)
 class PhoneSampleMigrationTest {
     @Test
@@ -43,7 +43,13 @@ class PhoneSampleMigrationTest {
             helper.writableDatabase // Persist a genuine user_version=10 database.
             helper.close()
             room = Room.databaseBuilder(context, AppDatabase::class.java, name)
-                .addMigrations(AppDatabase.MIGRATION_10_11).build()
+                .addMigrations(*listOf("10_11", "11_12").map { version ->
+                    // A production-signed helper may target Release rather than Debug;
+                    // Kotlin internal getter suffixes differ between those variants.
+                    AppDatabase.Companion.javaClass.methods.first {
+                        it.name.startsWith("getMIGRATION_$version")
+                    }.invoke(AppDatabase.Companion) as androidx.room.migration.Migration
+                }.toTypedArray()).build()
             val dao = room.temperatureRecordDao()
             val rows = dao.getAllRecordsSync("synthetic-device").associateBy { it.id }
             assertEquals(3, rows.size)
@@ -77,7 +83,7 @@ class PhoneSampleMigrationTest {
                 assertTrue(it.moveToFirst()); assertEquals("synthetic-preserved",it.getString(0))
             }
             room.openHelper.writableDatabase.query("PRAGMA user_version").use {
-                assertTrue(it.moveToFirst()); assertEquals(11,it.getInt(0))
+                assertTrue(it.moveToFirst()); assertEquals(12,it.getInt(0))
             }
         } finally {
             room?.close(); helper.close(); context.deleteDatabase(name)

@@ -4,6 +4,8 @@
 
 本仓库统一维护固件、Android App 和硬件设计资料。
 
+> 开发候选为 Firmware 1.0.12 / App 1.1.5（Room12），新固件尚待真机验收；下列下载与既有实证仍对应正式 v1.0.11。时间机制见[方案与边界](docs/20261016-离线时间机制.md)。
+
 ## 下载与当前版本
 
 [下载正式版 v1.0.11](https://github.com/linckr/NRF52xxx-FieldTemp/releases/tag/v1.0.11)
@@ -154,7 +156,7 @@ $env:PANDA_RELEASE_KEYSTORE_PROPERTIES = "<仓库外 keystore.properties 路径>
 .\gradlew.bat :app:assembleRelease :app:lintRelease
 ```
 
-生产发布必须提供正式签名配置，并核对 APK 证书 SHA-256 指纹。**当前脚本缺少正式配置时仍会回退到 Debug 签名，这是待修复的发布构建风险，不能将该产物用于正式分发。** 后续应改为缺少生产签名即构建失败；日常测试使用 `assembleDebug`。本次功能更新没有修改签名回退行为。配置模板与客户端说明见 [android/README.md](android/README.md)。
+生产发布必须提供正式签名配置，并核对 APK 证书 SHA-256 指纹。当前源码已禁止缺配置时回退 Debug，并拒绝使用 Android Debug 证书构建 Release；日常测试使用 `assembleDebug`。配置模板见 [android/README.md](android/README.md)。
 
 ## Flash 分区与资源
 
@@ -212,3 +214,8 @@ $env:PANDA_RELEASE_KEYSTORE_PROPERTIES = "<仓库外 keystore.properties 路径>
 本项目基于 [yodfz/NRF52xxx-FieldTemp](https://github.com/yodfz/NRF52xxx-FieldTemp) 与 [yodfz/PandaThemperature-Android](https://github.com/yodfz/PandaThemperature-Android) 继续开发，感谢原作者的固件、客户端与硬件设计工作。本项目增加了统一工程维护、历史电压、同步与重连保护、生产签名部署和真机验证记录。
 
 截至本次核对，统一仓库没有独立 `LICENSE` 文件，GitHub 也未识别两个上游仓库的许可证。源码、PCB 与外壳模型的许可范围仍需分别核实；本 README 不新增或代替原作者的授权。Zephyr、MCUboot 和 Android 依赖保留各自许可证。
+
+
+## 冷启动离线使用注意
+
+当前版本重新装入电池后，应先连接App完成本次上电的时间同步，再断开用于离线记录。上电闪烁只表示程序开始启动，不保证Flash/传感器初始化或可信时间已恢复。断电后NVS保存的旧对时时间不能反映停机经过时长，未对时的记录可能显示在旧日期；详情与已知问题见[接手入口](CODEX_START_HERE.md)。10月15日骑行异常正在保全原始数据诊断，不能据App界面未显示就断言硬件没采样。

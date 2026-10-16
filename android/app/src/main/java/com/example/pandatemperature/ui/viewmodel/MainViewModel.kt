@@ -372,8 +372,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val historySession = HistorySyncSession()
     private var historyFetchJob: Job? = null
     private var historyFinishJob: Job? = null
+    @Volatile private var offlineClockReady = false
 
     init {
+        // Local browsing must be available before Bluetooth permissions or radio setup.
+        viewModelScope.launch {
+            val latestDevice = withContext(Dispatchers.IO) { deviceDao.getLatestDevice() }
+            if (_viewingDeviceAddress.value == null) {
+                _viewingDeviceAddress.value = latestDevice?.macAddress
+            }
+        }
+        viewModelScope.launch {
+            _viewingDeviceAddress.collect { address ->
+                _historyDetailRecords.value = emptyList()
+                _last24HoursRecords.value = emptyList()
+                if (address != null) {
+                    loadHistoryDetail()
+                    loadLast24HoursRecords()
+                }
+            }
+        }
         try {
             // 监听连接状态变化
             viewModelScope.launch {
@@ -393,6 +411,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 )
                                 
                                 // 自动执行初始化操作
+                                offlineClockReady = false
                                 initializeDevice()
                             }
                             BleManager.ConnectionState.Disconnected -> {
@@ -409,7 +428,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             
-            // 移除 loadLocalHistory() 调用，历史数据现在通过 Flow 自动加载
+            // Bluetooth setup is independent of the local history selection above.
         } catch (e: Exception) {
             Log.e("MainViewModel", "ViewModel 初始化错误", e)
         }
@@ -1437,6 +1456,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         addLog("时间同步重试中... (${retryCount}/${maxRetries})", LogType.INFO)
                         kotlinx.coroutines.delay(500) // 重试前等待500ms
                     }
+                    // Preserve the previous boot's last anchor before the firmware replaces it.
+                    saveDeviceClockAnchor()
                     
                     // ⭐ 修复：与WEB端保持一致，发送秒级时间戳（uint32，小端序）
                     // WEB端：const timestamp = Math.floor(Date.now() / 1000);
@@ -1454,12 +1475,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             deferred.complete(writeSuccess)
                         }
                     )
-                    success = deferred.await()
+                    success = withTimeoutOrNull(BLE_NOTIFY_TIMEOUT_MS) { deferred.await() } == true
                     
                     // 等待写入完成确认（额外延迟确保设备处理完成）
                     kotlinx.coroutines.delay(200)
                     
                     if (success) {
+                        saveDeviceClockAnchor()
                         val dateStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
                             .format(java.util.Date(timestamp * 1000L))
                         addLog("时间同步成功: $dateStr", LogType.SUCCESS)
@@ -1472,6 +1494,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    success = false
                     retryCount++
                     addLog("时间同步异常: ${e.message}", LogType.ERROR)
                     if (retryCount > maxRetries) {
@@ -1482,6 +1506,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             
             success
         }
+    }
+
+    private suspend fun saveDeviceClockAnchor() {
+        if (!bleManager.isCharacteristicReadable(BleConstants.TIME_SYNC_CHAR)) return
+        offlineClockReady = false
+        val address = deviceAddress.value ?: error("Device disconnected during clock metadata read")
+        val result = CompletableDeferred<ByteArray?>()
+        bleManager.readCharacteristic(BleConstants.TIME_SYNC_CHAR) { result.complete(it) }
+        val data = withTimeoutOrNull(BLE_NOTIFY_TIMEOUT_MS) { result.await() }
+            ?: error("Clock metadata read failed; previous anchor was not overwritten")
+        require(deviceAddress.value == address) { "Device changed during clock metadata read" }
+        require(data.size == 24 && ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN).int == 0x31434c4f) {
+            "Unsupported clock metadata; previous anchor was not overwritten"
+        }
+        require(ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN).getInt(4) > 0) {
+            "Device relative clock could not reserve a safe boot range"
+        }
+        val anchor = OfflineClockMetadata.parseAnchor(address, data)
+        require(ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN).getInt(8) == 0 || anchor != null) {
+            "Invalid persisted clock anchor; preserve the existing mapping"
+        }
+        anchor?.let { confirmed ->
+            withContext(Dispatchers.IO) { recordDao.saveTimeAnchor(confirmed) }
+        }
+        offlineClockReady = true
     }
     
     /**
@@ -1732,6 +1781,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun fetchHistory(lastTimestamp: Long = 0, forceFullSync: Boolean = false) {
+        if ((_deviceStatus.value?.firmwareVersion ?: 0) >= 12 && !offlineClockReady) {
+            addLog("离线时间元数据尚未确认，保留本地记录并暂停历史同步", LogType.ERROR)
+            return
+        }
         if (isMaintainingHistory) {
             addLog("历史维护正在执行，请稍后同步", LogType.INFO)
             return
@@ -2408,8 +2461,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     recordDao.getLatestRecords(address, historyPageSize)
                 }
                 
-                _historyDetailRecords.value = records
-                _hasMoreHistory.value = records.size >= historyPageSize
+                if (_viewingDeviceAddress.value == address) {
+                    _historyDetailRecords.value = records
+                    _hasMoreHistory.value = records.size >= historyPageSize
+                }
             } catch (e: Exception) {
                 addLog("加载历史数据失败: ${e.message}", LogType.ERROR)
             }
@@ -2499,6 +2554,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val records = recordDao.getRecordsByTimeRange(address, startTime, endTime)
+                if (_viewingDeviceAddress.value != address) return@launch
                 _last24HoursRecords.value = records
                 addLog("已加载筛选数据，共 ${records.size} 条记录", LogType.INFO)
             } catch (e: Exception) {
@@ -2530,6 +2586,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     recordDao.getRecordsByTimeRange(address, defaultStartTime, currentTime)
                 }
                 
+                if (_viewingDeviceAddress.value != address) return@launch
                 _last24HoursRecords.value = records
                 addLog("已加载图表数据，共 ${records.size} 条记录", LogType.INFO)
 

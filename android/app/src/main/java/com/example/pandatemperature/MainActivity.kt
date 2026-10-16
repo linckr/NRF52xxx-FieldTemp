@@ -276,6 +276,10 @@ class MainActivity : ComponentActivity() {
         }
         
         if (needPermissions.isNotEmpty()) {
+            if (action == BluetoothReadyAction.STARTUP_AUTO_CONNECT) {
+                pendingBluetoothReadyAction = null
+                return // Local history remains usable without a permission dialog.
+            }
             // 先请求权限
             requestPermissionLauncher.launch(needPermissions.toTypedArray())
             return
@@ -283,6 +287,10 @@ class MainActivity : ComponentActivity() {
         
         // 权限已授予，检查蓝牙是否启用
         if (bluetoothAdapter?.isEnabled != true) {
+            if (action == BluetoothReadyAction.STARTUP_AUTO_CONNECT) {
+                pendingBluetoothReadyAction = null
+                return // Enabling Bluetooth is an explicit connection action.
+            }
             // 请求启用蓝牙（此时已有 BLUETOOTH_CONNECT 权限）
             val enableBtIntent = android.content.Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
             enableBluetoothLauncher.launch(enableBtIntent)

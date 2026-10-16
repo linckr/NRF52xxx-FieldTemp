@@ -1,4 +1,6 @@
 import java.util.Properties
+import java.security.KeyStore
+import java.security.cert.X509Certificate
 
 plugins {
     alias(libs.plugins.android.application)
@@ -12,9 +14,8 @@ plugins {
  * 未设置时兼容仓库根目录的 keystore.properties。
  * 该文件已被 .gitignore 排除，签名文件与口令都不入库、不进源码压缩包。
  *
- * 未提供 keystore.properties 时，release 变体退回 Android 默认调试密钥签名，
- * 使 assembleRelease 仍能产出可直接安装的 APK（仅用于本地联调，
- * 不可用于分发；一旦补齐正式签名，产物签名会随之改变）。
+ * Release 产物任务必须通过正式签名校验；缺少配置时明确失败。
+ * 本地联调使用 Debug，不能回退为 Debug 签名的 Release。
  */
 val externalSigningProperties = providers.environmentVariable("PANDA_RELEASE_KEYSTORE_PROPERTIES")
     .orNull?.trim()?.takeIf { it.isNotEmpty() }
@@ -61,8 +62,8 @@ android {
         applicationId = "com.example.pandatemperature"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.1.4"
+        versionCode = 7
+        versionName = "1.1.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -94,10 +95,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // 优先使用 keystore.properties 的正式签名；缺失时退回调试密钥，
-            // 保证 release APK 仍可安装，便于真机联调。
             signingConfig = signingConfigs.findByName("release")
-                ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {
@@ -111,6 +109,30 @@ android {
         compose = true
         // 用于注入 OTA 授权密钥（见 defaultConfig.buildConfigField）
         buildConfig = true
+    }
+}
+
+val verifyProductionSigning = tasks.register("verifyProductionSigning") {
+    doLast {
+        require(hasReleaseSigning) {
+            "Release requires production signing. Set PANDA_RELEASE_KEYSTORE_PROPERTIES; use assembleDebug for local testing."
+        }
+        val config = android.signingConfigs.getByName("release")
+        val store = requireNotNull(config.storeFile) { "Release keystore is not configured" }
+        require(store.isFile) { "Release keystore file is missing" }
+        val keyStore = KeyStore.getInstance(KeyStore.getDefaultType())
+        store.inputStream().use { keyStore.load(it, config.storePassword!!.toCharArray()) }
+        val certificate = keyStore.getCertificate(config.keyAlias) as? X509Certificate
+            ?: error("Release signing certificate is missing")
+        require(!certificate.subjectX500Principal.name.replace(" ", "").contains("CN=AndroidDebug", ignoreCase = true)) {
+            "Android Debug certificates cannot sign production Release artifacts"
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name in setOf("assembleRelease", "bundleRelease", "packageRelease", "packageReleaseBundle", "validateSigningRelease")) {
+        dependsOn(verifyProductionSigning)
     }
 }
 

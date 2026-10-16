@@ -1,6 +1,9 @@
 # DEVELOPMENT.md — 开发环境与构建
 
-## 2026-10-14 最新验收：上电提示与三位电压
+> 2026-10-16 开发候选：Firmware 1.0.12 / App 1.1.5 / Room12。新固件尚未部署验收，正式发布仍为 v1.0.11。新增相对时间、时间特征 READ 元数据及历史请求 0x05 见[协议补充](docs/20261016-离线时间机制.md)；其余 UUID、分区和 OTA 报文保持不变。Release 构建现已禁止 Debug 签名回退。
+
+
+## 2026-10-14 历史验收（以下为当时版本）：上电提示与三位电压
 
 当前 Firmware **1.0.11+0**、生产 App **1.1.4/code6**、Room11。LINK/P0.5为实物唯一已确认可见的灯：应用启动最早阶段250 ms亮/250 ms灭，6次共3秒，再启动蓝牙。用户已确认整根SWD断开后的电池冷启动“闪烁、熄灭”，以及“连接常亮、断开熄灭”。启动软件重启也提示；MCUboot在进入应用之前失败时仍无提示，不代表电池座接触缺陷已修复。
 
@@ -47,7 +50,7 @@ App首页、配置、历史列表/详情、设备管理、电池指示及日志7
 | `sysbuild/mcuboot.conf` | MCUboot 自身的 Kconfig（SPI NOR、布局页 4096、RC 32k、关日志） |
 | `sysbuild/mcuboot.overlay` | MCUboot 的 devicetree（**与 App 独立，改引脚要同步改**） |
 | `pm_static.yml` | Partition Manager 静态布局（**唯一编辑入口**） |
-| `VERSION` | **镜像版本号唯一来源**（正式 `1.0.10` + tweak `0`，TEST_ONLY+1不发布） |
+| `VERSION` | **镜像版本号唯一来源**（正式 `1.0.11` + tweak `0`，TEST_ONLY+1不发布） |
 | `tools/build_sysbuild.py` | 构建包装（引号安全 + 签名私钥注入），见 §2 |
 
 ### 关键 Kconfig（摘自实际构建）
@@ -107,7 +110,7 @@ $env:MCU_BOOT_SIGNING_KEY = "<仓库外的ECDSA-P256私钥路径>"
 ### 2.1 普通构建（干净重建，最常用）
 
 ```powershell
-cd C:\Users\linckr\NRF52xxx-FieldTemp
+cd D:\下载\PandaTemperature
 C:\ncs\toolchains\66cdf9b75e\opt\bin\python.exe tools\build_sysbuild.py build-v9
 ```
 
@@ -134,7 +137,7 @@ MCUboot **总是**跟着 App 一起被 sysbuild 构建，产物在
 单独查看 MCUboot 产物：
 
 ```powershell
-Get-ChildItem C:\Users\linckr\NRF52xxx-FieldTemp\build-v9\mcuboot\zephyr\zephyr.*
+Get-ChildItem D:\下载\PandaTemperature\build-v9\mcuboot\zephyr\zephyr.*
 ```
 
 ### 2.4 signed firmware 构建
@@ -143,7 +146,7 @@ Get-ChildItem C:\Users\linckr\NRF52xxx-FieldTemp\build-v9\mcuboot\zephyr\zephyr.
 
 ```powershell
 # 构建完成后，签名镜像已经在这里
-Get-Item C:\Users\linckr\NRF52xxx-FieldTemp\build-v9\NRF52xxx-FieldTemp\zephyr\zephyr.signed.bin
+Get-Item D:\下载\PandaTemperature\build-v9\PandaTemperature\zephyr\zephyr.signed.bin
 ```
 
 如需**独立校验**签名（不修改任何产物）：
@@ -152,17 +155,17 @@ Get-Item C:\Users\linckr\NRF52xxx-FieldTemp\build-v9\NRF52xxx-FieldTemp\zephyr\z
 $env:PYTHONPATH = "C:/ncs/v3.2.1/bootloader/mcuboot/scripts"
 C:\ncs\toolchains\66cdf9b75e\opt\bin\python.exe -m imgtool.main verify `
   --key $env:MCU_BOOT_SIGNING_KEY `
-  build-v9\NRF52xxx-FieldTemp\zephyr\zephyr.signed.bin
-# 正式源码构建期望：Image was correctly validated / Image version: 1.0.10+0
+  build-v9\PandaTemperature\zephyr\zephyr.signed.bin
+# 正式源码构建期望：Image was correctly validated / Image version: 1.0.11+0
 ```
 
 ### 2.5 查看构建产物
 
 ```powershell
-$B = "C:\Users\linckr\NRF52xxx-FieldTemp\build-v9"
-Get-ChildItem $B\NRF52xxx-FieldTemp\zephyr\zephyr.bin, `
-              $B\NRF52xxx-FieldTemp\zephyr\zephyr.signed.bin, `
-              $B\NRF52xxx-FieldTemp\zephyr\zephyr.elf, `
+$B = "D:\下载\PandaTemperature\build-v9"
+Get-ChildItem $B\PandaTemperature\zephyr\zephyr.bin, `
+              $B\PandaTemperature\zephyr\zephyr.signed.bin, `
+              $B\PandaTemperature\zephyr\zephyr.elf, `
               $B\mcuboot\zephyr\zephyr.hex, `
               $B\merged.hex, `
               $B\dfu_application.zip |
@@ -173,12 +176,12 @@ Get-ChildItem $B\NRF52xxx-FieldTemp\zephyr\zephyr.bin, `
 
 ```powershell
 # 方式一：生成 Zephyr 的 ram/rom 报告（在构建目录里跑 ninja）
-cd C:\Users\linckr\NRF52xxx-FieldTemp\build-v9\NRF52xxx-FieldTemp
+cd D:\下载\PandaTemperature\build-v9\PandaTemperature
 C:\ncs\toolchains\66cdf9b75e\opt\bin\ninja.exe ram_report
 C:\ncs\toolchains\66cdf9b75e\opt\bin\ninja.exe rom_report
 
 # 方式二（推荐）：项目的体积门禁，一次给出 A–J 共 14 项判定
-cd C:\Users\linckr\NRF52xxx-FieldTemp
+cd D:\下载\PandaTemperature
 C:\ncs\toolchains\66cdf9b75e\opt\bin\python.exe tools\size_summary.py build-v9
 
 # 版本/发布门禁
@@ -193,7 +196,7 @@ C:\ncs\toolchains\66cdf9b75e\opt\bin\python.exe tools\release_gate.py build-v9
 `ar.exe Permission denied` 之类的中断，用增量续跑即可，不必删目录重来：
 
 ```powershell
-C:\ncs\toolchains\66cdf9b75e\opt\bin\cmake.exe --build C:\Users\linckr\NRF52xxx-FieldTemp\build-v9
+C:\ncs\toolchains\66cdf9b75e\opt\bin\cmake.exe --build D:\下载\PandaTemperature\build-v9
 ```
 
 ---
@@ -237,7 +240,7 @@ $PYOCD = "C:\Users\linckr\.workbuddy\binaries\python\envs\default\Scripts\pyocd.
 ### 4.2 烧录（**首次/恢复用 `merged.hex`**）
 
 ```powershell
-$HEX = "C:\Users\linckr\NRF52xxx-FieldTemp\build-v9\merged.hex"
+$HEX = "D:\下载\PandaTemperature\build-v9\merged.hex"
 & $PYOCD flash -t nrf52810_xxaa --frequency 500k $HEX
 ```
 
@@ -336,7 +339,7 @@ C:\Users\linckr\.workbuddy\binaries\python\envs\default\Scripts\python.exe tools
 | `targetSdk` | **36** | 同上 |
 | `minSdk` | **26** | 同上 |
 | `applicationId` / `namespace` | `com.example.pandatemperature` | 同上 |
-| `versionCode` / `versionName` | **5 / "1.1.3"** | 同上（**与固件版本无关**） |
+| `versionCode` / `versionName` | **6 / "1.1.4"** | 同上（**与固件版本无关**） |
 | Java / Kotlin target | 11 | 同上 |
 | 构建变体 | `debug` / `release` | 无 flavor |
 
@@ -370,7 +373,7 @@ sdk.dir=<你的 Android SDK 路径>
 
 ```powershell
 $env:JAVA_HOME   = "C:\Users\linckr\.workbuddy\binaries\jdk\jdk-17.0.20.1+1"
-$SRC = "C:\Users\linckr\NRF52xxx-FieldTemp\android"
+$SRC = "D:\下载\PandaTemperature\android"
 ```
 
 ### 8.1 Debug 构建
@@ -562,3 +565,12 @@ INIT22仍未定因：3次暖重置JEDEC正确、rc=0，独立冷启动成功，�
 正式 Release 真机 Live98.168 s通过：初次连接及同步、连续两次全量各3062条、部分同步断线不删除已有ID、重连、立即增量重试及实时恢复。电压2.954→2.947 V为本轮ADC读数，未校准。最终SQLite integrity ok：active3363、模块3092、GPS187、无GPS手机样本84、quarantine22484，未来日期0、模块重复0。安装前3321条记录ID/核心字段均保留，所有原手机采样和隔离数据逐行匹配；3010条模块createdAt随全量同步刷新，属于现有入库元数据行为，非采样时间或核心数据改变。
 
 正式发布入口：[v1.0.10](https://github.com/linckr/NRF52xxx-FieldTemp/releases/tag/v1.0.10)。验收未修改固件或正式APK字节。生产OTA与本轮Release运行均已有真实设备证据；Android13+权限、长期运行、INIT22实际失败根因、ADC校准及NOR/NVMC忙脉冲断电仍没有新增验证。
+
+
+## 2026-10-15 发布基线与历史命令
+
+当前主仓库在D盘，须全新配置构建目录。当前正式基线已推进到1.0.11，release_gate的R3只允许更高版本作为下一次发布；对已发布1.0.11的相同产物重验会因版本相等而失败，这是预期。不要下调基线绕过版本检查。容量/签名核验与新版本发布门禁应区分；历史通过记录不是要求当前同版再次通过R3。
+
+根目录旧nRF52832批处理现为拒绝执行的说明入口。固定旧RAM地址的verify_v6_timing也拒绝执行，原内容以txt保留于tools/legacy/。历史build-vN示例和后半部旧验收只作追溯，当前版本与待办以CODEX_START_HERE为准。
+
+当前冷启动不能恢复断电期间绝对时间；骑行离线使用前应在本次上电后完成手机对时。启动三秒闪灯发生在存储初始化之前，不能作为Flash/采样验收依据。

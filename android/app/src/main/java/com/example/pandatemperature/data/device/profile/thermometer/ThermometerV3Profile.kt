@@ -14,9 +14,9 @@ class ThermometerV3Profile(
 ) : ThermometerV2Profile(firmwareVersion) {
 
     override fun buildHistoryRequest(timestamp: Long): ByteArray =
-        super.buildHistoryRequest(timestamp) + byteArrayOf(0x03)
+        super.buildHistoryRequest(timestamp) + byteArrayOf(if ((firmwareVersion ?: 0) >= 12) 0x05 else 0x03)
 
     override fun getHistoryParser(deviceId: String): DataParser<List<TemperatureRecord>> {
-        return HistoryDataParser(deviceId, HistoryRecordFormat.V3)
+        return HistoryDataParser(deviceId, HistoryRecordFormat.V3, supportsRelativeTime = (firmwareVersion ?: 0) >= 12)
     }
 }

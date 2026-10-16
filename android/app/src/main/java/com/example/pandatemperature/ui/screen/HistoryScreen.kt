@@ -407,7 +407,7 @@ fun HistoryScreen(
                                 // 检查是否需要显示分隔标签（检查与前一条记录的时间间隔）
                                 if (index > 0) {
                                     val prevRecord = historyRecords[index - 1]
-                                    if (prevRecord.timestamp > 0 && record.timestamp > 0) {
+                                    if (!prevRecord.timeUncertain && !record.timeUncertain && prevRecord.timestamp > 0 && record.timestamp > 0) {
                                         val diff = abs(prevRecord.timestamp - record.timestamp)
                                         // 如果时间间隔超过24小时，显示分隔标签
                                         if (diff > 86400) {

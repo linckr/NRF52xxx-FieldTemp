@@ -3,7 +3,7 @@
 
 / {
 	aliases {
-		/* W25Q64 使用此 SPI；52832 overlay 会覆盖为 &spi1 */
+		/* 当前52810使用此SPI；旧52832配置仅作历史归档 */
 		w25q64-spi = &spi0;
 	};
 	chosen {
@@ -103,7 +103,7 @@
 
 /* SPI0 - W25Q64 Flash（nRF52810 只有一组 SPI，与 I2C 不冲突）
  * 注意：引脚与 CS 必须写在本文件内，原因见上方 spi0_default_custom 的注释。
- * nRF52832 变体走 boards/nrf52832dk_nrf52832_cpuapp.overlay 的 spi1，spi0 保持 disabled。
+ * 旧nRF52832的SPI1方案已归档于docs/archive/boards/，不属于当前构建入口。
  */
 
 &spi0 {

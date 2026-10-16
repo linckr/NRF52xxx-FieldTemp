@@ -1,6 +1,9 @@
 # OTA.md — OTA 架构与升级链路
 
-## 2026-10-14 最新验收：上电提示与三位电压
+> 2026-10-16 开发候选：Firmware 1.0.12 / App 1.1.5 / Room12。新固件尚未部署验收，正式发布仍为 v1.0.11。新增相对时间、时间特征 READ 元数据及历史请求 0x05 见[协议补充](docs/20261016-离线时间机制.md)；其余 UUID、分区和 OTA 报文保持不变。Release 构建现已禁止 Debug 签名回退。
+
+
+## 2026-10-14 历史验收（以下为当时版本）：上电提示与三位电压
 
 当前 Firmware **1.0.11+0**、生产 App **1.1.4/code6**、Room11。LINK/P0.5为实物唯一已确认可见的灯：应用启动最早阶段250 ms亮/250 ms灭，6次共3秒，再启动蓝牙。用户已确认整根SWD断开后的电池冷启动“闪烁、熄灭”，以及“连接常亮、断开熄灭”。启动软件重启也提示；MCUboot在进入应用之前失败时仍无提示，不代表电池座接触缺陷已修复。
 
@@ -129,7 +132,7 @@ Application（新固件启动；验签不过则不搬运，设备继续跑旧固
 
 ### 3.4 签出的镜像与验证
 
-**签名产物**：`<build>/NRF52xxx-FieldTemp/zephyr/zephyr.signed.bin`
+**签名产物**：`<build>/<app_name>/zephyr/zephyr.signed.bin`
 （构建由 sysbuild 自动调用 imgtool，**不需要手工执行 `imgtool sign`**）。
 
 | 项目 | 参考值（`build-conflict-fix`，2026-09-15） |
@@ -158,7 +161,7 @@ Application（新固件启动；验签不过则不搬运，设备继续跑旧固
 ```
 $ PYTHONPATH=C:/ncs/v3.2.1/bootloader/mcuboot/scripts \
   <ncs-python> -m imgtool.main verify --key <root-ec-p256.pem> \
-  <sysbuild>/NRF52xxx-FieldTemp/zephyr/zephyr.signed.bin
+  <sysbuild>/<app_name>/zephyr/zephyr.signed.bin
 Image was correctly validated
 Image version: 1.0.8+0
 Image digest: 58f917bd62e97bbfd33a95139e2dc82afcef4d3c60032c819b34c650c05450f7
@@ -373,3 +376,5 @@ MCUboot 随后按固定布局解析（magic `0x96F3B83D`、`ih_hdr_size = 512`�
 正式 Release 真机 Live98.168 s通过：初次连接及同步、连续两次全量各3062条、部分同步断线不删除已有ID、重连、立即增量重试及实时恢复。电压2.954→2.947 V为本轮ADC读数，未校准。最终SQLite integrity ok：active3363、模块3092、GPS187、无GPS手机样本84、quarantine22484，未来日期0、模块重复0。安装前3321条记录ID/核心字段均保留，所有原手机采样和隔离数据逐行匹配；3010条模块createdAt随全量同步刷新，属于现有入库元数据行为，非采样时间或核心数据改变。
 
 正式发布入口：[v1.0.10](https://github.com/linckr/NRF52xxx-FieldTemp/releases/tag/v1.0.10)。验收未修改固件或正式APK字节。生产OTA与本轮Release运行均已有真实设备证据；Android13+权限、长期运行、INIT22实际失败根因、ADC校准及NOR/NVMC忙脉冲断电仍没有新增验证。
+
+新主仓库目录名为 PandaTemperature，因此新 sysbuild 应用子目录为 PandaTemperature；旧 C 盘构建记录中的 NRF52xxx-FieldTemp 仍属于旧产物路径。以 domains.yaml 为准，不能跨目录复用旧缓存。

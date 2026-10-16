@@ -1,4 +1,5 @@
-﻿/*
+#include "storage/offline_clock.h"
+/*
  * 参考 RIOT-2020.10-RC3 的 E104-BT5010A 板级配置实现蓝牙温度计程序
  * 
  * 重要配置说明（参考 periph_conf.h）：
@@ -87,11 +88,9 @@ static bool bt_ready = false;  // 蓝牙是否就绪
 // 时间同步相关变量
 static uint32_t time_base_timestamp = 0;  // 基准时间戳（Unix 时间戳，秒）
 static int64_t time_base_uptime = 0;      // 基准时间对应的系统运行时间（毫秒）
-static bool time_synced = false;           // 时间是否已同步（含从 NVS 恢复的旧时间）
-/* 时间基准是否来自**本次上电的手机对时**（决定是否按墙钟边界结算、是否对外宣称对齐）。
- * 仅从 NVS 恢复的旧时间不满足：设备停机期间秒数停走，恢复出来的时间必然偏慢，
- * 此时若仍按整分网格结算，会造出"看起来权威但绝对时刻是错的"时间戳。
- * 故只做严格等间隔（v6 行为），不宣称落在 :00 —— 见 §12.9。 */
+static bool time_synced = false;           // Whether a trusted clock or allocated relative clock is available
+/* Only a phone sync in this boot establishes wall-clock time and minute alignment.
+ * Before that, records carry allocated relative IDs; a saved old Unix date is never restored. */
 static bool wall_clock_aligned = false;
 
 // 配置相关变量
@@ -124,7 +123,7 @@ static uint16_t acc_press_n;       // 气压有效样本数
 static uint16_t window_ticks;      // 窗口内**实际聚合到**的采样节拍数（诊断用；不再是结算依据）
 static uint32_t window_deadline_ms;  // 本窗口的结算时刻（uptime ms，绝对网格；回绕安全）
 /* 本窗口结算后要写入记录的**墙钟边界时间戳**（interval 的整数倍）。
- * 仅当 wall_clock_aligned 为真时有效；否则为 0，记录时间戳退回"结算时刻的真实秒"。
+ * 仅当 wall_clock_aligned 为真时有效；否则为 0，记录时间戳使用相对时间编号。
  * 周期记录用边界值而不是"实际执行完成的时刻"——后者会带 0~1 秒的执行抖动。 */
 static uint32_t window_boundary_ts;
 static uint32_t last_valid_pressure_pa;  // 最近一次有效气压（气压通道故障时的回退值）
@@ -164,6 +163,7 @@ static uint32_t history_skipped_filtered = 0;     // 时间戳过滤跳过的记
 static struct bt_gatt_notify_params history_notify_params;
 static uint32_t history_transfer_epoch;
 static bool history_sending = false;                      // 是否有在途的历史通知
+static bool history_relative_enabled;
 static uint8_t history_wire_size = 12U;
 static uint8_t history_tx_buf[60];                        // 历史数据发送缓冲区（需保持到回调结束）
 
@@ -683,6 +683,7 @@ static void history_flush_buffer(void)
 static void history_push_record(uint32_t ts, int16_t temperature,
 				uint16_t humidity, uint32_t pressure_pa)
 {
+	if (ts == 0U) return; /* Relative-ID reservation failures must not create fake dates. */
 	/* OTA 期间暂停历史落盘：与 OTA 共用同一颗 W25Q64，且 SPI 争用会造成
 	 * OTA 写入的延迟抖动。这里只跳过本窗口的采样，不进重试缓冲 ——
 	 * 避免 OTA 结束后一次性补写，重新制造争用。 */
@@ -1119,7 +1120,7 @@ static void status_char_build(void)
 	sys_put_le16(history_interval, &status_char_data[0]);
 	sys_put_le16((uint16_t)MIN(stored, (uint32_t)0xFFFF), &status_char_data[2]);
 	status_char_data[4] = (bt_connected ? 0x01 : 0x00) |
-			      (time_synced ? 0x02 : 0x00) |
+			      (wall_clock_aligned ? 0x02 : 0x00) |
 			      ((data_clear_in_progress || retention_busy) ? 0x04 : 0x00) |
 			      /* bit3：墙钟可信（本次上电收到过手机对时）。
 			       * 仅从 NVS 恢复旧时间时为 0 —— 此时周期记录不按整分网格结算，
@@ -1170,10 +1171,11 @@ static ssize_t history_char_write_cb(struct bt_conn *conn,
         int ret = retention_request(sys_get_le32(bytes));
         return ret ? BT_GATT_ERR(BT_ATT_ERR_WRITE_NOT_PERMITTED) : len;
     }
-    if (len == 5U && bytes[4] != 3U) return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
+    if (len == 5U && bytes[4] != 3U && bytes[4] != 5U) return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
     if (retention_busy || data_clear_in_progress || history_transfer_active)
         return BT_GATT_ERR(BT_ATT_ERR_WRITE_NOT_PERMITTED);
     history_wire_size = len == 5U ? 14U : 12U;
+    history_relative_enabled = len == 5U && bytes[4] == 5U;
     history_start_timestamp = sys_get_le32(bytes);
     history_binary_search_done = false;
     return len;
@@ -1335,6 +1337,14 @@ static void history_char_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16
 // 时间特性数据缓冲区
 static uint8_t time_char_data[4];  // Unix 时间戳（uint32_t，4字节）
 
+static ssize_t time_char_read_cb(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                void *buf, uint16_t len, uint16_t offset)
+{
+    uint8_t metadata[OFFLINE_CLOCK_WIRE_SIZE];
+    offline_clock_metadata(metadata);
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, metadata, sizeof(metadata));
+}
+
 // 时间特性写入回调函数
 static ssize_t time_char_write_cb(struct bt_conn *conn,
 				   const struct bt_gatt_attr *attr,
@@ -1353,17 +1363,16 @@ static ssize_t time_char_write_cb(struct bt_conn *conn,
 	// 解析 Unix 时间戳（小端序）
 	uint32_t timestamp = sys_get_le32(time_char_data);
 
-	// 验证时间戳范围（1970-01-01 ~ 2106-02-07）
-	// Unix 时间戳范围：0 ~ 0xFFFFFFFF (uint32_t)
-	// 但合理范围：1970-01-01 (0) ~ 2106-02-07 (约 0xFFFFFFFF)
-	if (timestamp < 946684800) {  // 2000-01-01 00:00:00 UTC
-		printk("[时间同步] 警告: 时间戳可能不合理 (%u)\r\n", timestamp);
-		// 仍然接受，但给出警告
-	}
+    if (offset != 0U) return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
+    if (ble_ota_in_progress()) return BT_GATT_ERR(BT_ATT_ERR_WRITE_NOT_PERMITTED);
+    int64_t sync_uptime = k_uptime_get();
+    if (timestamp < OFFLINE_TIME_LIMIT || timestamp > 4102444800U ||
+            offline_clock_anchor(timestamp, sync_uptime / 1000) < 0)
+        return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
 
 	// 保存基准时间戳和对应的系统运行时间
 	time_base_timestamp = timestamp;
-	time_base_uptime = k_uptime_get();  // 获取当前系统运行时间（毫秒）
+	time_base_uptime = sync_uptime;  // Same instant used by the persisted reverse-calibration anchor.
 	time_synced = true;
 	/* 手机实时对时 → 墙钟可信。**必须重算下一边界**：对时可能把基准往前或往后拨，
 	 * 不重算的话 deadline 还挂在旧网格上，会立刻结算出一条时间戳错乱的记录。
@@ -1470,7 +1479,8 @@ static ssize_t temp_range_reset_char_write_cb(struct bt_conn *conn,
 #else
 #define REALTIME_FRAME_LEN 6
 #endif
-static uint8_t realtime_char_data[REALTIME_FRAME_LEN];
+/* Invalid sensor sentinels until the first complete sample; never publish startup zeros. */
+static uint8_t realtime_char_data[REALTIME_FRAME_LEN] = {0x00, 0x80, 0xff, 0xff, 0xff, 0xff};
 
 // 保存实时数据特征属性指针，供通知使用
 static const struct bt_gatt_attr *realtime_char_attr = NULL;
@@ -1587,9 +1597,9 @@ BT_GATT_SERVICE_DEFINE(config_service,
 			       history_info_char_read_cb, NULL, NULL),
 	BT_GATT_CUD("History Info", BT_GATT_PERM_READ),
 	BT_GATT_CHARACTERISTIC(&time_sync_char_uuid.uuid,
-			       BT_GATT_CHRC_WRITE,
-			       BT_GATT_PERM_WRITE,
-			       NULL, time_char_write_cb, NULL),
+			       BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
+			       BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
+			       time_char_read_cb, time_char_write_cb, NULL),
 	BT_GATT_CUD("Time Sync", BT_GATT_PERM_READ),
 	BT_GATT_CHARACTERISTIC(&temp_range_char_uuid.uuid,
 			       BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
@@ -1890,7 +1900,7 @@ static void sample_work_handler(struct k_work *work)
 		// 更新最高最低温度
 		int16_t temp_value = (int16_t)temperature;
 		bool temp_updated = false;
-		uint32_t current_time = get_current_timestamp();
+		uint32_t current_time = wall_clock_aligned ? get_current_timestamp() : 0U;
 		if (temp_value > max_temperature || max_temperature == INT16_MIN) {
 			max_temperature = temp_value;
 			max_temperature_timestamp = current_time;
@@ -2092,6 +2102,7 @@ static void bt_disconnected_cb(struct bt_conn *conn, uint8_t reason)
 	// 重置历史数据传输的时间戳过滤条件
 	// 避免下次连接时如果不设置时间戳，残留的旧值导致无法获取数据
     history_wire_size = 12U;
+    history_relative_enabled = false;
 	if (history_start_timestamp != 0) {
 		history_start_timestamp = 0;
 		printk("[历史] 断开连接，重置起始时间戳为 0\r\n");
@@ -2178,6 +2189,7 @@ static uint32_t __maybe_unused get_current_timestamp(void)
 		return 0;  // 时间未同步
 	}
 
+    if (!wall_clock_aligned) return offline_clock_now(k_uptime_get() / 1000);
 	// 当前时间 = 基准时间戳 + (当前运行时间 - 基准运行时间) / 1000
 	int64_t current_uptime = k_uptime_get();
 	int64_t elapsed_ms = current_uptime - time_base_uptime;
@@ -2847,7 +2859,7 @@ static void history_send_work_handler(struct k_work *work)
 	}
 	
 	// 首次传输时，若设置了起始时间戳则用线性查找定位“第一条 > 时间戳”的记录；若为 0 则从 oldest 开始
-	if (!history_binary_search_done && history_start_timestamp > 0) {
+	if (!history_binary_search_done && history_start_timestamp > 0 && !history_relative_enabled) {
 		uint16_t start_sector, start_record;
 		if (linear_find_first_after_timestamp(history_start_timestamp, &start_sector, &start_record)) {
 			history_transfer_sector = start_sector;
@@ -3005,7 +3017,11 @@ static void history_send_work_handler(struct k_work *work)
 		records_scanned++;
 		
 		// 时间戳过滤（二分查找后理论上不需要，但保留作为安全检查）
-		if (history_start_timestamp > 0 && rec.timestamp <= history_start_timestamp) {
+		if (rec.timestamp < OFFLINE_TIME_LIMIT && !history_relative_enabled) {
+            history_skipped_filtered++;
+            continue;
+        }
+        if (rec.timestamp >= OFFLINE_TIME_LIMIT && history_start_timestamp > 0 && rec.timestamp <= history_start_timestamp) {
 			history_skipped_filtered++;
 			continue;  // 跳过不符合条件的记录
 		}
@@ -3251,22 +3267,9 @@ int main(void)
             memset(&retention, 0, sizeof(retention));
         }
 	}
-	// 从 NVS 加载时间（如果之前已同步过）
-	{
-		uint32_t saved_timestamp;
-		bool saved_time_synced;
-		nvs_load_time(&saved_timestamp, &saved_time_synced);
-		if (saved_time_synced) {
-			time_base_timestamp = saved_timestamp;
-			time_base_uptime = k_uptime_get();
-			time_synced = true;
-		}
-		/* 无论恢复成功与否，都**不宣称**墙钟对齐：恢复出来的是上次对时的旧值，
-		 * 停机期间秒数停走，它必然偏慢。要等**本次上电**收到手机对时才算可信
-		 * （届时由 time_char_write_cb 置位并重算边界）。
-		 * 在此之前周期记录退回"严格等间隔 + 真实秒"，不按整分网格造"看起来对齐"的时间戳。 */
-		wall_clock_aligned = false;
-	}
+    /* Never restore an old Unix date. Reserve unique opaque IDs before offline sampling. */
+    time_synced = offline_clock_boot() == 0;
+    wall_clock_aligned = false;
 	int storage_err = storage_init();
 	if (storage_err != 0) {
 		printk("[系统] 严重错误: Flash 初始化失败 (%d)，系统停机\r\n", storage_err);

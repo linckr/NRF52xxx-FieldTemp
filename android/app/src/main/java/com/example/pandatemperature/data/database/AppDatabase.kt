@@ -10,13 +10,14 @@ import com.example.pandatemperature.data.database.dao.DeviceDao
 import com.example.pandatemperature.data.database.dao.TemperatureRecordDao
 import com.example.pandatemperature.data.model.Device
 import com.example.pandatemperature.data.model.TemperatureRecord
+import com.example.pandatemperature.data.model.HistoryTimeAnchor
 
 /**
  * Room 数据库实例
  */
 @Database(
-    entities = [TemperatureRecord::class, Device::class],
-    version = 11,
+    entities = [TemperatureRecord::class, Device::class, HistoryTimeAnchor::class],
+    version = 12,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -92,6 +93,14 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        internal val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE temperature_records ADD COLUMN rawTimestamp INTEGER")
+                database.execSQL("ALTER TABLE temperature_records ADD COLUMN timeUncertain INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("CREATE TABLE IF NOT EXISTS history_time_anchors (deviceId TEXT NOT NULL, relativeStart INTEGER NOT NULL, relativeEnd INTEGER NOT NULL, unixOffset INTEGER NOT NULL, PRIMARY KEY(deviceId, relativeStart))")
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -105,7 +114,8 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_7_8,
                         MIGRATION_8_9,
                         MIGRATION_9_10,
-                        MIGRATION_10_11
+                        MIGRATION_10_11,
+                        MIGRATION_11_12
                     )
                     // 继续兼容没有显式迁移路径的早期开发版本；v5 及以上会优先
                     // 使用上面的完整迁移链，因此正常升级到 v11 不会清空历史数据。

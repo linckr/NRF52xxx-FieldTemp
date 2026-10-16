@@ -22,6 +22,7 @@ static uint8_t flash_bytes[W25Q64_STORAGE_SIZE];
 static uint16_t next_sector, oldest_sector, next_record_in_sector, history_interval=60;
 static struct data_record ram_buffer[RAM_BUFFER_SIZE];
 static uint8_t ram_buffer_count, history_tx_buf[60], history_wire_size;
+static bool history_relative_enabled;
 static bool time_synced = true, sector_switched_flag, position_dirty;
 static bool data_clear_in_progress, history_transfer_active, history_sending, bt_connected, bt_ready;
 static uint32_t history_start_timestamp;

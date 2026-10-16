@@ -57,25 +57,12 @@ fun HistoryCard(
 ) {
     // 只显示最近5条记录
     val latestRecords = historyRecords.take(5)
-    val isConnected = connectionState != BleManager.ConnectionState.Disconnected
     
     Box(modifier = modifier.fillMaxWidth()) {
         // 内容区域
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .then(
-                    // 未连接时，对内容应用模糊效果（Android 12+）
-                    if (!isConnected && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        Modifier.graphicsLayer {
-                            renderEffect = RenderEffect
-                                .createBlurEffect(15f, 15f, Shader.TileMode.CLAMP)
-                                .asComposeRenderEffect()
-                        }
-                    } else {
-                        Modifier
-                    }
-                ),
+                .fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
         // 标题和"全部 >"按钮
@@ -266,10 +253,10 @@ private fun HistoryPreviewItem(
     // 日期时间合并格式（modifier 可由外部传入 clickable 以支持点击跳转详情页）
     val dateTimeFormat = SimpleDateFormat("yyyy年MM月dd日 HH:mm:ss", Locale.getDefault())
     
-    val dateTimeStr = if (record.timestamp > 0) {
-        dateTimeFormat.format(Date(record.timestamp * 1000))
+    val dateTimeStr = if (record.timestamp > 0 && !record.timeUncertain) {
+        dateTimeFormat.format(Date(record.timestamp * 1000)) + if (record.rawTimestamp != null) "（已校准）" else ""
     } else {
-        "未同步时间"
+        "时间未确定"
     }
     
     Surface(
@@ -427,11 +414,11 @@ fun HistoryTableRow(
     ) {
         // 时间列（左对齐）
         Text(
-            text = if (record.timestamp > 0) {
+            text = if (record.timestamp > 0 && !record.timeUncertain) {
                 SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-                    .format(Date(record.timestamp * 1000))
+                    .format(Date(record.timestamp * 1000)) + if (record.rawTimestamp != null) "（已校准）" else ""
             } else {
-                "未同步时间"
+                "时间未确定"
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -480,10 +467,10 @@ fun HistoryItem(
 ) {
     // 时间格式化
     val timeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-    val timeStr = if (record.timestamp > 0) {
-        timeFormat.format(Date(record.timestamp * 1000))
+    val timeStr = if (record.timestamp > 0 && !record.timeUncertain) {
+        timeFormat.format(Date(record.timestamp * 1000)) + if (record.rawTimestamp != null) "（已校准）" else ""
     } else {
-        "未同步时间"
+        "时间未确定"
     }
     
     // 气压值（如果有）

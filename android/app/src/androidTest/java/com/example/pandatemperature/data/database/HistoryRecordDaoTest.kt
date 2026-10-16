@@ -19,6 +19,37 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class HistoryRecordDaoTest {
+    @Test
+    fun relativeReplayAndAnchorPreserveIdentityAndOtherBoots() = runBlocking {
+        val early = record(601).copy(rawTimestamp = 601, timeUncertain = true)
+        val otherBoot = record(4201).copy(rawTimestamp = 4201, timeUncertain = true)
+        dao.upsertHistoryRecords(listOf(early, otherBoot))
+        val originalId = dao.findRelativeRecord("test-device-a", 601)!!.id
+        val phone = record(601).copy(isPhoneSample = true)
+        val phoneId = dao.insert(phone)
+        dao.saveTimeAnchor(com.example.pandatemperature.data.model.HistoryTimeAnchor(
+            "test-device-a", 1, 1801, 1_792_100_000L - 1801))
+        dao.upsertHistoryRecords(listOf(early, otherBoot))
+        val resolved = dao.findRelativeRecord("test-device-a", 601)!!
+        assertEquals(originalId, resolved.id)
+        assertEquals(1_792_098_800L, resolved.timestamp)
+        assertEquals(601L, resolved.rawTimestamp)
+        org.junit.Assert.assertFalse(resolved.timeUncertain)
+        org.junit.Assert.assertTrue(dao.findRelativeRecord("test-device-a", 4201)!!.timeUncertain)
+        assertEquals(phone.copy(id = phoneId), dao.getAllRecordsSync("test-device-a").single { it.id == phoneId })
+        var rejected = false
+        try {
+            dao.saveTimeAnchor(com.example.pandatemperature.data.model.HistoryTimeAnchor(
+                "test-device-a", 1, 1801, 42))
+        } catch (_: IllegalArgumentException) { rejected = true }
+        org.junit.Assert.assertTrue(rejected)
+        assertEquals(resolved, dao.findRelativeRecord("test-device-a", 601))
+        rejected = false
+        try { dao.upsertHistoryRecords(listOf(early.copy(temperature = 99f))) }
+        catch (_: IllegalArgumentException) { rejected = true }
+        org.junit.Assert.assertTrue(rejected)
+        assertEquals(resolved, dao.findRelativeRecord("test-device-a", 601))
+    }
     private lateinit var database: AppDatabase
     private lateinit var dao: TemperatureRecordDao
 

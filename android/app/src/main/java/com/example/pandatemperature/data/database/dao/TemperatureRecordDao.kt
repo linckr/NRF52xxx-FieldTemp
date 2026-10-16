@@ -2,6 +2,7 @@ package com.example.pandatemperature.data.database.dao
 
 import androidx.room.*
 import com.example.pandatemperature.data.model.TemperatureRecord
+import com.example.pandatemperature.data.model.HistoryTimeAnchor
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -9,6 +10,29 @@ import kotlinx.coroutines.flow.Flow
  */
 @Dao
 interface TemperatureRecordDao {
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertTimeAnchor(anchor: HistoryTimeAnchor)
+
+    @Query("SELECT * FROM history_time_anchors WHERE deviceId = :deviceId AND relativeStart <= :raw AND relativeEnd >= :raw LIMIT 1")
+    suspend fun findTimeAnchor(deviceId: String, raw: Long): HistoryTimeAnchor?
+
+    @Query("SELECT * FROM temperature_records WHERE deviceId = :deviceId AND rawTimestamp = :raw AND isPhoneSample = 0 AND latitude IS NULL AND longitude IS NULL ORDER BY id LIMIT 1")
+    suspend fun findRelativeRecord(deviceId: String, raw: Long): TemperatureRecord?
+
+    @Query("UPDATE temperature_records SET timestamp = rawTimestamp + :offset, timeUncertain = 0 WHERE deviceId = :deviceId AND rawTimestamp >= :start AND rawTimestamp <= :end AND timeUncertain = 1 AND isPhoneSample = 0 AND latitude IS NULL AND longitude IS NULL")
+    suspend fun applyTimeAnchor(deviceId: String, start: Long, end: Long, offset: Long)
+
+    @Transaction
+    suspend fun saveTimeAnchor(anchor: HistoryTimeAnchor) {
+        val previous = findTimeAnchor(anchor.deviceId, anchor.relativeStart)
+        require(previous == null || previous == anchor) {
+            "Relative clock session conflicts with a saved anchor; preserve data and check NVS recovery"
+        }
+        insertTimeAnchor(anchor)
+        // Use the first saved mapping even if a subsequent phone reports a different clock.
+        val saved = findTimeAnchor(anchor.deviceId, anchor.relativeStart) ?: return
+        applyTimeAnchor(saved.deviceId, saved.relativeStart, saved.relativeEnd, saved.unixOffset)
+    }
     
     /**
      * 插入单条记录
@@ -23,7 +47,7 @@ interface TemperatureRecordDao {
     suspend fun insertAll(records: List<TemperatureRecord>)
     
     /** Only matches module history; phone samples with or without GPS remain independent. */
-    @Query("SELECT * FROM temperature_records WHERE deviceId = :deviceId AND timestamp IN (:timestamps) AND isPhoneSample = 0 AND latitude IS NULL AND longitude IS NULL ORDER BY id ASC")
+    @Query("SELECT * FROM temperature_records WHERE deviceId = :deviceId AND timestamp IN (:timestamps) AND rawTimestamp IS NULL AND isPhoneSample = 0 AND latitude IS NULL AND longitude IS NULL ORDER BY id ASC")
     suspend fun getHistoryRecordsByTimestamps(deviceId: String, timestamps: List<Long>): List<TemperatureRecord>
 
     /** Repeated full/incremental downloads update existing module rows instead of adding duplicates. */
@@ -33,7 +57,22 @@ interface TemperatureRecordDao {
             "Module history must not contain phone samples or GPS coordinates"
         }
         // Keep the last sample for each device/timestamp within this batch.
-        val uniqueRecords = records.associateBy { it.deviceId to it.timestamp }.values
+        val relative = records.filter { it.rawTimestamp != null }
+        for (record in relative) {
+            val raw = requireNotNull(record.rawTimestamp)
+            val existing = findRelativeRecord(record.deviceId, raw)
+            require(existing == null || (existing.temperature == record.temperature &&
+                existing.humidity == record.humidity && existing.pressure == record.pressure &&
+                existing.batteryVoltage == record.batteryVoltage)) {
+                "Relative history identity conflict; refusing to replace immutable sensor data"
+            }
+            val anchor = findTimeAnchor(record.deviceId, raw)
+            val resolved = if (anchor != null) record.copy(timestamp = raw + anchor.unixOffset, timeUncertain = false)
+                else if (existing != null && !existing.timeUncertain) record.copy(timestamp = existing.timestamp, timeUncertain = false)
+                else record
+            insert(resolved.copy(id = existing?.id ?: 0L))
+        }
+        val uniqueRecords = records.filter { it.rawTimestamp == null }.associateBy { it.deviceId to it.timestamp }.values
         for ((deviceId, deviceRecords) in uniqueRecords.groupBy { it.deviceId }) {
             // Chunk the IN query to stay below SQLite's bind-parameter limit.
             for (batch in deviceRecords.chunked(500)) {
@@ -98,7 +137,7 @@ interface TemperatureRecordDao {
     /**
      * 查询最新的N条记录（按时间戳倒序）
      */
-    @Query("SELECT * FROM temperature_records WHERE deviceId = :deviceId AND timestamp > 0 ORDER BY timestamp DESC LIMIT :limit")
+    @Query("SELECT * FROM temperature_records WHERE deviceId = :deviceId AND timestamp > 0 ORDER BY timeUncertain DESC, timestamp DESC LIMIT :limit")
     suspend fun getLatestRecords(deviceId: String, limit: Int): List<TemperatureRecord>
     
     /**
@@ -110,13 +149,13 @@ interface TemperatureRecordDao {
     /**
      * 获取最新的一条「无 GPS」记录（设备同步下来的；排除手机定时写入的带 GPS 记录，用于请求设备历史时的起始时间戳）
      */
-    @Query("SELECT * FROM temperature_records WHERE deviceId = :deviceId AND timestamp > 0 AND isPhoneSample = 0 AND latitude IS NULL AND longitude IS NULL ORDER BY timestamp DESC LIMIT 1")
+    @Query("SELECT * FROM temperature_records WHERE deviceId = :deviceId AND timestamp > 0 AND timeUncertain = 0 AND isPhoneSample = 0 AND latitude IS NULL AND longitude IS NULL ORDER BY timestamp DESC LIMIT 1")
     suspend fun getLatestRecordWithoutGps(deviceId: String): TemperatureRecord?
     
     /**
      * 分页查询记录（按时间戳倒序）
      */
-    @Query("SELECT * FROM temperature_records WHERE deviceId = :deviceId AND timestamp > 0 ORDER BY timestamp DESC LIMIT :limit OFFSET :offset")
+    @Query("SELECT * FROM temperature_records WHERE deviceId = :deviceId AND timestamp > 0 ORDER BY timeUncertain DESC, timestamp DESC LIMIT :limit OFFSET :offset")
     suspend fun getRecordsWithOffset(deviceId: String, limit: Int, offset: Int): List<TemperatureRecord>
     
     /**
@@ -134,6 +173,6 @@ interface TemperatureRecordDao {
     /**
      * 查询最新的N条记录（Flow版本，用于首页显示）
      */
-    @Query("SELECT * FROM temperature_records WHERE deviceId = :deviceId AND timestamp > 0 ORDER BY timestamp DESC LIMIT :limit")
+    @Query("SELECT * FROM temperature_records WHERE deviceId = :deviceId AND timestamp > 0 ORDER BY timeUncertain DESC, timestamp DESC LIMIT :limit")
     fun getLatestRecordsFlow(deviceId: String, limit: Int): Flow<List<TemperatureRecord>>
 }
