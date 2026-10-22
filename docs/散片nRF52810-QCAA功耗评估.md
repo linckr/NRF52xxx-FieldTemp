@@ -838,7 +838,7 @@ E104-BT5010A 模块的额外功耗来源：
 - `docs/功耗优化完整方案.md` - 软件和硬件功耗优化方案
 - `docs/DCDC配置说明.md` - DCDC 转换器配置说明
 - `docs/32.768kHz晶振选型与功耗分析.md` - 外部晶振选型指南
-- `E104-BT5010A+datasheet_CN_v2.0.pdf` - 模块数据手册
+- [模组数据手册](datasheets/E104-BT5010A+datasheet_CN_v2.0.pdf) - 模块数据手册
 
 ---
 

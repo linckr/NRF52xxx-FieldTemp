@@ -10,6 +10,6 @@
 
 来源为手机的零温湿度采样、缺失/撤回权限路径、Android13+权限及长期运行仍待独立排查。三位小数不等于ADC已经校准。
 
-入口：[CODEX_START_HERE](https://github.com/linckr/NRF52xxx-FieldTemp/blob/main/CODEX_START_HERE.md)、[PROTOCOL](https://github.com/linckr/NRF52xxx-FieldTemp/blob/main/PROTOCOL.md)、[最终验收](https://github.com/linckr/NRF52xxx-FieldTemp/blob/main/docs/20261014-startup-voltage-validation.md)、[正式发布v1.0.11](https://github.com/linckr/NRF52xxx-FieldTemp/releases/tag/v1.0.11)。
+入口：[CODEX_START_HERE](https://github.com/linckr/NRF52xxx-FieldTemp/blob/main/CODEX_START_HERE.md)、[PROTOCOL](https://github.com/linckr/NRF52xxx-FieldTemp/blob/main/docs/guides/PROTOCOL.md)、[最终验收](https://github.com/linckr/NRF52xxx-FieldTemp/blob/main/docs/20261014-startup-voltage-validation.md)、[正式发布v1.0.11](https://github.com/linckr/NRF52xxx-FieldTemp/releases/tag/v1.0.11)。
 
 本轮本地历史选择不依赖蓝牙；启动时蓝牙关闭/缺权限不弹连接准备。相对时间、Room迁移及验证状态见[机制说明](../docs/20261016-离线时间机制.md)。

@@ -261,11 +261,11 @@ P2开发信任链升级、V3回读与硬件3000条保留已验证，冷启动持
 
 | 文档 | 什么时候读 |
 |---|---|
-| [`HANDOFF.md`](../../HANDOFF.md) | **必读第二篇**。状态、任务、禁止改动项、代码地图、技术债、一致性检查 |
-| [`DEVELOPMENT.md`](../../DEVELOPMENT.md) | 要构建 / 烧录 / 调试时（含可直接复制的 PowerShell 命令） |
-| [`HARDWARE.md`](../../HARDWARE.md) | 要碰引脚或分区时（含完整分区表与"为什么必须写在这里"） |
-| [`OTA.md`](../../OTA.md) | 要碰升级链路、签名、镜像格式时 |
-| [`PROTOCOL.md`](../../PROTOCOL.md) | 要改 BLE 协议或排查两端不一致时（byte-level 表） |
+| [`HANDOFF.md`](20261023-HANDOFF.md) | **必读第二篇**。状态、任务、禁止改动项、代码地图、技术债、一致性检查 |
+| [`DEVELOPMENT.md`](../guides/DEVELOPMENT.md) | 要构建 / 烧录 / 调试时（含可直接复制的 PowerShell 命令） |
+| [`HARDWARE.md`](../guides/HARDWARE.md) | 要碰引脚或分区时（含完整分区表与"为什么必须写在这里"） |
+| [`OTA.md`](../guides/OTA.md) | 要碰升级链路、签名、镜像格式时 |
+| [`PROTOCOL.md`](../guides/PROTOCOL.md) | 要改 BLE 协议或排查两端不一致时（byte-level 表） |
 | `docs/`（仓库内） | ⚠️ **上游历史设计文档**，描述的是旧方案，**不要当当前实现读** |
 
 新接手者的第一条纪律：**文档与代码冲突时以代码为准**，并把冲突补记到 `HANDOFF.md` §12。

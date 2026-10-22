@@ -1,5 +1,7 @@
 # HARDWARE.md — 硬件定义与 Flash 分区
 
+> 文档位置为 `docs/guides/`，源码路径以仓库根目录为基准；资源数字按文中版本理解，当前候选与发布限制见[开发入口](../../CODEX_START_HERE.md)。
+
 > 本文所有引脚与地址均从**当前仓库实际代码与最近一次构建产物**读取，不从记忆或设计稿抄录。
 > 取证来源：`app.overlay`、`sysbuild/mcuboot.overlay`、`src/board_pins.h`、`pm_static.yml`、
 > 构建产物 `<sysbuild>/partitions.yml` 与 `pm_config.h`。

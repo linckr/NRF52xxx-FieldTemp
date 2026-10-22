@@ -4,7 +4,7 @@
 
 本仓库统一维护固件、Android App 和硬件设计资料。
 
-> 开发候选为 Firmware 1.0.12 / App 1.1.5（Room12），新固件尚待真机验收；下列下载与既有实证仍对应正式 v1.0.11。时间机制见[方案与边界](docs/20261016-离线时间机制.md)。
+> 开发候选为 Firmware 1.0.12 / App 1.1.5（Room12），候选已完成部分真机验收，BLE RX 栈余量仍阻塞发布；下列下载与既有实证仍对应正式 v1.0.11。时间机制见[方案与边界](docs/20261016-离线时间机制.md)。
 
 ## 下载与当前版本
 
@@ -72,7 +72,7 @@ OTA 镜像必须与设备 MCUboot 内嵌公钥匹配。SWD 工厂部署会更新
 
 ## 历史容量与存储策略
 
-硬件当前有效环形容量为 **64848 条**，预留一个完整扇区用于擦除回收。容量达到上限后循环覆盖最旧记录。接线、GPIO 和存储布局见 [HARDWARE.md](HARDWARE.md)。
+硬件当前有效环形容量为 **64848 条**，预留一个完整扇区用于擦除回收。容量达到上限后循环覆盖最旧记录。接线、GPIO 和存储布局见 [HARDWARE.md](docs/guides/HARDWARE.md)。
 
 容量按当前页布局计算：物理记录为 12 B，每个 256 B 页容纳 21 条，每个 4 KiB 扇区容纳 `16 × 21 = 336` 条。逻辑环使用 194 个扇区，扣除 1 个擦除备用扇区，得到 `(194 − 1) × 336 = 64848` 条。History 物理区为 1 MiB，不能直接按 `1 MiB / 12 B` 推导有效容量；电压扩展返回格式也不改变物理记录长度。
 
@@ -92,7 +92,7 @@ MCUboot → ECDSA-P256 验签 → 搬运到 primary → 启动应用
 
 **固件可信边界是 MCUboot 验签。** `OTA_AUTH_KEY` 用于轻量操作授权与防误操作，不应视为真正的固件安全边界。
 
-当前使用 overwrite-only 搬运模式，不提供双镜像自动回滚。OTA 只能使用 `zephyr.signed.bin`，不能用裸应用 `zephyr.bin`、工厂镜像 `merged.hex` 或 ELF 替代。详细流程见 [OTA.md](OTA.md)，报文定义见 [PROTOCOL.md](PROTOCOL.md)。
+当前使用 overwrite-only 搬运模式，不提供双镜像自动回滚。OTA 只能使用 `zephyr.signed.bin`，不能用裸应用 `zephyr.bin`、工厂镜像 `merged.hex` 或 ELF 替代。详细流程见 [OTA.md](docs/guides/OTA.md)，报文定义见 [PROTOCOL.md](docs/guides/PROTOCOL.md)。
 
 ECDSA 验签拒绝不受信任密钥签署的镜像；是否阻止旧版本回滚或固件降级，还取决于独立的版本保护配置，不能仅凭签名推断。
 
@@ -107,7 +107,7 @@ ECDSA 验签拒绝不受信任密钥签署的镜像；是否阻止旧版本回�
 ├─ android/              Android Gradle 工程
 ├─ PCB/                  PCB 与 BOM
 ├─ 3DModel/              外壳设计
-├─ docs/                 开发计划与专题验证记录
+├─ docs/                 文档索引、开发手册、验证记录与历史资料
 ├─ VERSION               固件版本唯一来源
 ├─ app.overlay           应用设备树 overlay
 ├─ prj.conf              应用 Kconfig
@@ -119,7 +119,9 @@ ECDSA 验签拒绝不受信任密钥签署的镜像；是否阻止旧版本回�
 
 **本统一仓库的 `android/` 是 Android 唯一日常开发入口。** [Android 独立仓库](https://github.com/linckr/PandaThemperature-Android) 的 `source/` 通过受控同步维护，保留用于提交原 Android 上游 PR；不应在两处独立修改后无记录地双向覆盖。
 
-涉及协议的贡献优先提交到本统一仓库，同时检查两端实现；维护者将配套修改同步到独立仓库，再分别更新 Firmware 和 Android 上游 PR。旧 `README.rst` 仅作为历史入口，当前项目介绍以本文件为准。
+涉及协议的贡献优先提交到本统一仓库，同时检查两端实现；维护者将配套修改同步到独立仓库，再分别更新 Firmware 和 Android 上游 PR。旧说明入口已归档至 `docs/archive/README.rst`，当前项目介绍以本文件为准。
+
+文档入口：[开发手册](docs/guides/DEVELOPMENT.md)、[硬件与分区](docs/guides/HARDWARE.md)、[OTA](docs/guides/OTA.md)、[协议](docs/guides/PROTOCOL.md)、[资料与历史索引](docs/README.md)。
 
 ## 快速构建
 
@@ -135,7 +137,7 @@ python tools/size_summary.py build-production --quiet
 python tools/release_gate.py build-production --quiet
 ```
 
-SWD 初始部署使用 `build-production/merged.hex`；OTA 使用 `build-production/NRF52xxx-FieldTemp/zephyr/zephyr.signed.bin`。DAPLink / pyOCD 连接、烧录与完整环境配置见 [DEVELOPMENT.md](DEVELOPMENT.md)。
+SWD 初始部署使用 `build-production/merged.hex`；OTA 使用 `build-production/NRF52xxx-FieldTemp/zephyr/zephyr.signed.bin`。DAPLink / pyOCD 连接、烧录与完整环境配置见 [DEVELOPMENT.md](docs/guides/DEVELOPMENT.md)。
 
 自行生成的私钥不能签出已有生产 MCUboot 接受的镜像；自建信任根需要部署对应公钥的 MCUboot。
 
@@ -199,11 +201,12 @@ $env:PANDA_RELEASE_KEYSTORE_PROPERTIES = "<仓库外 keystore.properties 路径>
 | 文档 | 内容 |
 |---|---|
 | [CODEX_START_HERE.md](CODEX_START_HERE.md) | 接手入口与当前状态 |
-| [HANDOFF.md](HANDOFF.md) | 验证证据、风险及剩余任务 |
-| [DEVELOPMENT.md](DEVELOPMENT.md) | 构建、烧录与开发流程 |
-| [HARDWARE.md](HARDWARE.md) | 硬件接线、GPIO 与 Flash 布局 |
-| [PROTOCOL.md](PROTOCOL.md) | Firmware 与 Android 的 BLE / OTA 协议 |
-| [OTA.md](OTA.md) | 签名、升级架构与操作说明 |
+| [文档索引](docs/README.md) | 手册、验证记录与资料分类 |
+| [整理前交接](docs/history/20261023-HANDOFF.md) | 历史基线与验证边界快照 |
+| [DEVELOPMENT.md](docs/guides/DEVELOPMENT.md) | 构建、烧录与开发流程 |
+| [HARDWARE.md](docs/guides/HARDWARE.md) | 硬件接线、GPIO 与 Flash 布局 |
+| [PROTOCOL.md](docs/guides/PROTOCOL.md) | Firmware 与 Android 的 BLE / OTA 协议 |
+| [OTA.md](docs/guides/OTA.md) | 签名、升级架构与操作说明 |
 
 当前代码是最终事实源。协议改动必须同时检查 Firmware 和 Android；不要随意更改 Flash 分区、BLE UUID、OTA 报文、签名算法或 MCUboot 配置。
 

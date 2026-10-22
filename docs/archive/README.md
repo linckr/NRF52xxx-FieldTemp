@@ -5,3 +5,5 @@ templates/sample.yaml.txt为原Blinky/frdm_k64f测试模板，未代表本产品
 src/sensors备选驱动、RIOT参考、PCB/模型与Word资料仍保留，不能依据文件日期猜测生产硬件版本，也不能把归档当成固件体积优化。
 
 android/*.kt.txt 保留两个默认生成的模板测试（2+2与包名断言），已退出测试源目录；历史报告中的测试数量属于当时验收，不作为当前新测试总数。
+
+2026-10-23 补充：[旧 README.rst](README.rst) 收录原跳转入口。当前文档统一从[文档索引](../README.md)进入。

@@ -21,20 +21,37 @@
 
 历史版本1.0.11冷启动读取NVS上次手机对时值作为新时间起点，不能计算断电期间经过时长；没有有效缓存时间时不聚合历史。有缓存时会以旧日期继续记录，之后手机对时不会重写已有记录。增量请求又按本地最新历史时间过滤，所以可能漏取时间回退的记录。已取得4324条有效环记录，其中一段520条、约8小时18分钟的数据被写在10月14日15:19–23:37，且520条已逐条匹配realme数据库。此次主要是错日期展示，不是这520条未同步。还存在现场重启证据，原因未唯一确定。详见[离线诊断](docs/20261015-离线记录时间回退诊断.md)。
 
-**上电闪烁只代表进入应用启动阶段，发生在Flash和蓝牙初始化之前；不代表传感器、存储或离线时钟均正常。仍运行正式1.0.11的设备重新上电后应先连接App完成对时。测试1.0.12改用相对时间和首次连接校正，跨启动及独立电池验收仍待完成。** 无持续供电的绝对时钟时，软件不能知道任意断电时长；不能凭旧NVS时间声称已恢复可信墙钟。
+**上电闪烁只代表进入应用启动阶段，发生在Flash和蓝牙初始化之前；不代表传感器、存储或离线时钟均正常。仍运行正式1.0.11的设备重新上电后应先连接App完成对时。测试1.0.12改用相对时间和首次连接校正，受控跨启动隔离已通过，独立电池及长期离线验收仍待完成。** 无持续供电的绝对时钟时，软件不能知道任意断电时长；不能凭旧NVS时间声称已恢复可信墙钟。
 
 ## 必须保持的约束
 
-1. 代码是事实源。开始前先读[HANDOFF](HANDOFF.md)、[DEVELOPMENT](DEVELOPMENT.md)、[HARDWARE](HARDWARE.md)、[OTA](OTA.md)、[PROTOCOL](PROTOCOL.md)、[CLAUDE](CLAUDE.md)及Android说明。
+1. 代码是事实源。开始前先读下方代码地图、[DEVELOPMENT](docs/guides/DEVELOPMENT.md)、[HARDWARE](docs/guides/HARDWARE.md)、[OTA](docs/guides/OTA.md)、[PROTOCOL](docs/guides/PROTOCOL.md)、[CLAUDE](CLAUDE.md)及Android说明。
 2. Firmware/App为同一协议两端；改变报文或兼容行为须同时检查两端。优先复用已有实现，不做无依据的大重构。
 3. 不擅改MCUboot配置、Flash分区、UUID、W25Q64布局或签名算法。固件可信边界是MCUboot ECDSA-P256验签，OTA_AUTH_KEY只作操作授权。
 4. 私钥、OTA授权材料、Android keystore、口令和私人数据库不入Git/Release；生产密钥保留仓库外。
 5. BLE OTA只用`zephyr.signed.bin`，工厂部署用含MCUboot的merged镜像；overwrite-only不提供双镜像回滚保证。
 6. 不删除Room旧迁移、旧协议兼容、历史检查点迁移和GC。取消旧3000策略后有效环容量为64848，旧资料不能作为恢复旧限制的依据。
 
+## 代码地图
+
+| 路径 | 用途 |
+|---|---|
+| src/main.c | 采样、聚合、时间基准、GATT、历史环与传输调度 |
+| src/ble/ble_ota.c | 自定义OTA上传、续传、END校验及安装触发 |
+| src/ble/ble_adv.c | 广播名称和快/慢/间歇策略 |
+| src/storage/ | Zephyr SPI NOR访问、NVS配置和历史编码 |
+| src/sensors/aht30.c、spl06.c | 当前温湿度和气压来源 |
+| src/led.c、src/vdd.c | 指示灯和内部VDD测量 |
+| android/ | 唯一日常Android开发源；独立仓库受控同步上游 |
+| pm_static.yml、app.overlay、sysbuild/ | 分区、设备树、MCUboot子镜像配置；修改须明确授权 |
+| tools/ | 当前构建、空间/版本门禁、诊断工具 |
+| docs/history/、docs/archive/ | 历史实证/过时设计及仅供阅读的工具，非发布入口 |
+
+交接基线、版本哈希和历史验证边界完整保留于[整理前交接快照](docs/history/20261023-HANDOFF.md)。文档分类入口见[文档索引](docs/README.md)。
+
 ## 开发与发布
 
-构建说明及可复制命令见[DEVELOPMENT](DEVELOPMENT.md)。迁移后使用D盘新的构建目录重新配置，不复用C盘CMake/Gradle缓存。生产签名配置必须在仓库外提供，正式分发核对证书。
+构建说明及可复制命令见[DEVELOPMENT](docs/guides/DEVELOPMENT.md)。迁移后使用D盘新的构建目录重新配置，不复用C盘CMake/Gradle缓存。生产签名配置必须在仓库外提供，正式分发核对证书。
 
 `tools/release-baseline.json`记录最新正式版本1.0.11；发布门禁要求候选严格高于它，同版本重验被R3拒绝是预期。不要退回旧基线来让新发布过关。容量/分区检查可独立使用size_summary。
 
