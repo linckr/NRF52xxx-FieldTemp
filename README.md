@@ -107,7 +107,9 @@ ECDSA 验签拒绝不受信任密钥签署的镜像；是否阻止旧版本回�
 ├─ android/              Android Gradle 工程
 ├─ PCB/                  PCB 与 BOM
 ├─ 3DModel/              外壳设计
-├─ docs/                 文档索引、开发手册、验证记录与历史资料
+├─ docs/                 文档索引、开发手册与验证记录
+│  ├─ archive/           归档的旧文档、参考与旧配置
+│  └─ history/           历史交接快照与已完成计划
 ├─ VERSION               固件版本唯一来源
 ├─ app.overlay           应用设备树 overlay
 ├─ prj.conf              应用 Kconfig
@@ -121,7 +123,7 @@ ECDSA 验签拒绝不受信任密钥签署的镜像；是否阻止旧版本回�
 
 涉及协议的贡献优先提交到本统一仓库，同时检查两端实现；维护者将配套修改同步到独立仓库，再分别更新 Firmware 和 Android 上游 PR。旧说明入口已归档至 `docs/archive/README.rst`，当前项目介绍以本文件为准。
 
-文档入口：[开发手册](docs/guides/DEVELOPMENT.md)、[硬件与分区](docs/guides/HARDWARE.md)、[OTA](docs/guides/OTA.md)、[协议](docs/guides/PROTOCOL.md)、[资料与历史索引](docs/README.md)。
+文档入口：[开发手册](docs/guides/DEVELOPMENT.md)、[硬件与分区](docs/guides/HARDWARE.md)、[OTA](docs/guides/OTA.md)、[协议](docs/guides/PROTOCOL.md)、[资料与历史索引](docs/README.md)。归档索引见[旧文档与参考](docs/archive/legacy-docs/README.md)、[已完成历史计划](docs/history/plans/README.md)。
 
 ## 快速构建
 
@@ -189,6 +191,7 @@ $env:PANDA_RELEASE_KEYSTORE_PROPERTIES = "<仓库外 keystore.properties 路径>
 - 生产 Release APK 已在小米 Android 12 / API 31 安装，实际 APK 与发布产物完整哈希一致。
 - Release 真机回归通过初次连接、连续全量同步、同步中断后的数据保留、重连、增量重试和实时恢复；签名切换后的数据库与设置恢复核对通过。
 - 固件环形存储回归、123 项 JVM 测试、9 项 Room / 迁移测试及 Release lint 通过。
+- 2026-11-14 真机核验：小米 Android 12/API 31 上 App 为 **1.1.5 / versionCode 7**（生产签名证书），设备固件为 **1.0.12+0**（主槽 153171 B，SHA-256 `0066cedb2a5d32d11b78f6243e39bf2e847e1b0c63924f6478a97f9532f41be4`），与仓库候选镜像一致；该候选仍受 BLE RX 栈余量阻塞，尚未发布。
 
 仍待完成：偶发初始化错误 **22** 的实际失败取证与根因确认、电池电压 ADC 校准、Android 13 及以上权限行为与长期运行验证，以及 NOR / NVMC 实际忙脉冲期间的精确断电验证。已有 P3 阶段断电恢复测试不能替代忙脉冲验证。
 
@@ -203,6 +206,8 @@ $env:PANDA_RELEASE_KEYSTORE_PROPERTIES = "<仓库外 keystore.properties 路径>
 | [CODEX_START_HERE.md](CODEX_START_HERE.md) | 接手入口与当前状态 |
 | [文档索引](docs/README.md) | 手册、验证记录与资料分类 |
 | [整理前交接](docs/history/20261023-HANDOFF.md) | 历史基线与验证边界快照 |
+| [旧文档与参考归档](docs/archive/legacy-docs/README.md) | 旧版本、旧硬件、旧协议与选题参考（33 份） |
+| [历史计划归档](docs/history/plans/README.md) | 已完成历史计划（8 份） |
 | [DEVELOPMENT.md](docs/guides/DEVELOPMENT.md) | 构建、烧录与开发流程 |
 | [HARDWARE.md](docs/guides/HARDWARE.md) | 硬件接线、GPIO 与 Flash 布局 |
 | [PROTOCOL.md](docs/guides/PROTOCOL.md) | Firmware 与 Android 的 BLE / OTA 协议 |
