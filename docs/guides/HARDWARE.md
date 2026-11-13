@@ -19,13 +19,13 @@
 | 外部 Flash | **W25Q64**（Winbond，SPI NOR） | 8 MiB / 64 Mbit |
 | 温湿度 | AHT30（I2C） | `src/sensors/aht30.c` |
 | 气压 | SPL06（I2C） | `src/sensors/spl06.c` |
-| 紫外线 | LTR-390UV（I2C） | `src/sensors/ltr390.c` —— 代码在，**当前主流程未调用** |
+| 紫外线 | LTR-390UV（I2C） | `src/sensors/backup/ltr390.c` —— 代码在，**当前主流程未调用** |
 | 供电 | DCDC（板级默认已开） | 由 `nrf52dk_nrf52810.dts` 提供 `regulator-initial-mode = NRF5X_REG_MODE_DCDC` |
 
 ### 硬件限制（决定了本项目的所有取舍）
 
 - **192 KiB 内部 Flash 要同时装 MCUboot(32 KiB) + 主槽(160 KiB)**，应用实际可用 163,328 B，
-  当前构建已用 151,700 B（92.88%，1.0.11上电LINK提示）→ 增长空间极小。
+  1.0.11 构建已用 151,700 B（92.88%，上电 LINK 提示）；当前 1.0.12 候选为 152,508 B → 增长空间极小。
 - **24 KiB RAM 是最紧约束**：App 已用 23,016 B（**93.65%**），静态余量仅 1,560 B。
   任何新增功能都必须先看 RAM。
 - **没有电池电压采样/分压电路**。电池电压改用 SAADC 内部 VDD 通道测量（见 §6）。
@@ -142,8 +142,8 @@ serial recovery 会拉进 UART 驱动、帧协议、`boot_serial` 与命令处�
 |---|---|---|
 | **AHT30** | 温湿度（主采集源） | `src/sensors/aht30.c` |
 | **SPL06** | 气压 | `src/sensors/spl06.c` |
-| SHT40 | 温湿度（备选，**当前主流程未使用**） | `src/sensors/sht40.c` |
-| LTR-390UV | 紫外线（**当前主流程未使用**） | `src/sensors/ltr390.c` |
+| SHT40 | 温湿度（备选，**当前主流程未使用**） | `src/sensors/backup/sht40.c` |
+| LTR-390UV | 紫外线（**当前主流程未使用**） | `src/sensors/backup/ltr390.c` |
 
 ---
 
@@ -210,7 +210,7 @@ serial recovery 会拉进 UART 驱动、帧协议、`boot_serial` 与命令处�
 |---|---|---|---|---|---|
 | `mcuboot` | `0x00000` | `0x08000` | **32,768 B (32 KiB)** | 0 | Bootloader，当前实占 31,876 B |
 | `mcuboot_pad` | `0x08000` | `0x08200` | **512 B** | 2 | 镜像头（header）预留区 |
-| `app` | `0x08200` | `0x30000` | **163,328 B (0x27E00)** | 4 | 主槽应用区，当前构建实占 151,700 B（1.0.11） |
+| `app` | `0x08200` | `0x30000` | **163,328 B (0x27E00)** | 4 | 主槽应用区，1.0.11 构建实占 151,700 B（1.0.12 候选 152,508 B） |
 | `mcuboot_primary` | `0x08000` | `0x30000` | **163,840 B (0x28000)** | 3 | 容器：span `[mcuboot_pad, app]` |
 | `mcuboot_primary_app` | `0x08200` | `0x30000` | **163,328 B** | 5 | 容器：span `[app]` |
 | `sram_primary` | `0x20000000` | `0x20006000` | **24,576 B (24 KiB)** | — | 非 Flash，仅列出完整布局 |

@@ -40,7 +40,7 @@
 | `sysbuild/mcuboot.conf` | MCUboot 自身的 Kconfig（SPI NOR、布局页 4096、RC 32k、关日志） |
 | `sysbuild/mcuboot.overlay` | MCUboot 的 devicetree（**与 App 独立，改引脚要同步改**） |
 | `pm_static.yml` | Partition Manager 静态布局（**唯一编辑入口**） |
-| `VERSION` | **镜像版本号唯一来源**（正式 `1.0.11` + tweak `0`，TEST_ONLY+1不发布） |
+| `VERSION` | **镜像版本号唯一来源**（当前 `1.0.12` + tweak `0`；正式发布仍为 `1.0.11`，TEST_ONLY+1不发布） |
 | `tools/build_sysbuild.py` | 构建包装（引号安全 + 签名私钥注入），见 §2 |
 
 ### 关键 Kconfig（摘自实际构建）
@@ -146,7 +146,7 @@ $env:PYTHONPATH = "C:/ncs/v3.2.1/bootloader/mcuboot/scripts"
 C:\ncs\toolchains\66cdf9b75e\opt\bin\python.exe -m imgtool.main verify `
   --key $env:MCU_BOOT_SIGNING_KEY `
   build-v9\PandaTemperature\zephyr\zephyr.signed.bin
-# 正式源码构建期望：Image was correctly validated / Image version: 1.0.11+0
+# 当前源码构建期望：Image was correctly validated / Image version: 1.0.12+0（正式发布仍为 1.0.11）
 ```
 
 ### 2.5 查看构建产物
@@ -329,7 +329,7 @@ C:\Users\linckr\.workbuddy\binaries\python\envs\default\Scripts\python.exe tools
 | `targetSdk` | **36** | 同上 |
 | `minSdk` | **26** | 同上 |
 | `applicationId` / `namespace` | `com.example.pandatemperature` | 同上 |
-| `versionCode` / `versionName` | **6 / "1.1.4"** | 同上（**与固件版本无关**） |
+| `versionCode` / `versionName` | **7 / "1.1.5"** | 同上（**与固件版本无关**；正式发布为 6 / "1.1.4"） |
 | Java / Kotlin target | 11 | 同上 |
 | 构建变体 | `debug` / `release` | 无 flavor |
 
