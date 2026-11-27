@@ -123,6 +123,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // 每次 ViewModel 生命周期只允许一次启动自动连接；手动连接不走此标记。
     private var startupAutoConnectAttempted = false
+    /** 用户主动断开时禁止自动重连。 */
+    private var manualDisconnectRequested = false
+    /** 意外断开后的自动重连次数（最多 3 次）。 */
+    private var reconnectAttempts = 0
+    private var reconnectJob: Job? = null
 
     // 当前正在查看历史记录的设备地址（默认为当前连接设备，断开后保留）
     private val _viewingDeviceAddress = MutableStateFlow<String?>(null)
@@ -400,6 +405,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         when (state) {
                             BleManager.ConnectionState.ServicesDiscovered -> {
                                 addLog("设备连接成功，服务已发现", LogType.SUCCESS)
+                                reconnectAttempts = 0
+                                manualDisconnectRequested = false
                                 
                                 // ⭐ 关键修复：连接成功时，设置当前查看的设备地址
                                 _viewingDeviceAddress.value = bleManager.deviceAddress.value
@@ -416,9 +423,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             }
                             BleManager.ConnectionState.Disconnected -> {
                                 addLog("设备已断开连接", LogType.INFO)
-                                BleConnectionForegroundService.stop(getApplication())
-                                // 清理状态
-                                resetConnectionState()
+                                val address = _viewingDeviceAddress.value
+                                val canRetry = !manualDisconnectRequested && address != null &&
+                                    reconnectAttempts < 3
+                                if (canRetry) {
+                                    reconnectAttempts++
+                                    addLog(
+                                        "连接意外断开，5 秒后自动重连（第 $reconnectAttempts/3 次）",
+                                        LogType.INFO
+                                    )
+                                    reconnectJob?.cancel()
+                                    reconnectJob = viewModelScope.launch {
+                                        delay(5000)
+                                        _taskStatus.value = TaskStatus("正在重连...", 0, 0)
+                                        val ok = bleManager.connect(address)
+                                        if (!ok) {
+                                            _taskStatus.value = null
+                                            addLog("自动重连失败", LogType.ERROR)
+                                        }
+                                    }
+                                    // 保持前台服务运行，避免重连期间进程被系统回收。
+                                } else {
+                                    BleConnectionForegroundService.stop(getApplication())
+                                    resetConnectionState()
+                                }
                             }
                             else -> {}
                         }
@@ -589,6 +617,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun connectDevice(device: BluetoothDevice) {
         viewModelScope.launch {
+            manualDisconnectRequested = false
+            reconnectAttempts = 0
+            reconnectJob?.cancel()
+            reconnectJob = null
             // 关闭对话框
             closeDeviceDialog()
             
@@ -613,6 +645,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun connectDevice(address: String) {
         viewModelScope.launch {
+            manualDisconnectRequested = false
+            reconnectAttempts = 0
+            reconnectJob?.cancel()
+            reconnectJob = null
             // 关闭对话框
             closeDeviceDialog()
             
@@ -633,8 +669,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * 断开连接
      */
     fun disconnectDevice() {
+        manualDisconnectRequested = true
+        reconnectAttempts = 0
+        reconnectJob?.cancel()
+        reconnectJob = null
         bleManager.disconnect()
         addLog("已断开连接", LogType.INFO)
+    }
+
+    /** 当前是否处于已连接/发现服务状态。 */
+    fun isConnected(): Boolean =
+        connectionState.value != BleManager.ConnectionState.Disconnected &&
+            connectionState.value != BleManager.ConnectionState.Connecting
+
+    /**
+     * 蓝牙权限被系统收回（例如用户在设置中撤销 BLUETOOTH_CONNECT）。
+     * 立即主动断开，避免后续 GATT 调用抛 SecurityException。
+     */
+    fun handleBluetoothPermissionRevoked() {
+        if (!isConnected()) return
+        addLog("蓝牙权限已被收回，已断开连接", LogType.ERROR)
+        manualDisconnectRequested = true
+        bleManager.disconnect()
     }
     
     /**

@@ -130,6 +130,8 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // 从设置返回时同步定位权限状态，确保用户后来授权后手机记录会带 GPS
         syncLocationPermissionToViewModel()
+        // Android 12+：若用户在系统设置里收回了蓝牙权限，主动断开，避免 GATT 调用崩溃。
+        checkBluetoothPermissionOnResume()
 
         // 首次进入前台时执行一次启动自动连接准备流程。
         if (!startupAutoConnectStarted) {
@@ -242,6 +244,22 @@ class MainActivity : ComponentActivity() {
                 Manifest.permission.ACCESS_COARSE_LOCATION
             )
         )
+    }
+
+    /** Android 12+ 蓝牙运行时权限被收回时，主动断开并提示。 */
+    private fun checkBluetoothPermissionOnResume() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val required = arrayOf(
+            Manifest.permission.BLUETOOTH_SCAN,
+            Manifest.permission.BLUETOOTH_CONNECT
+        )
+        val missing = required.any {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing && viewModel.isConnected()) {
+            Toast.makeText(this, "蓝牙权限已被收回，连接已断开，请重新授权", Toast.LENGTH_LONG).show()
+            viewModel.handleBluetoothPermissionRevoked()
+        }
     }
 
     /**

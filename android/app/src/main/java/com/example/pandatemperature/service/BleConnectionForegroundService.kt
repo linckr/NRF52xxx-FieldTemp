@@ -7,6 +7,7 @@ import android.app.Service
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.pandatemperature.MainActivity
 import com.example.pandatemperature.R
@@ -28,10 +29,17 @@ class BleConnectionForegroundService : Service() {
         val deviceName = intent?.getStringExtra(EXTRA_DEVICE_NAME)
             ?: getString(R.string.ble_connection_notification_device_unknown)
         val notification = buildNotification(deviceName)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            // Android 12+ 后台启动限制 / 缺少前台服务类型权限时，避免直接崩溃。
+            Log.e(TAG, "startForeground failed; connection continues without foreground service", e)
+            stopSelf()
+            return START_NOT_STICKY
         }
         return START_NOT_STICKY
     }
@@ -71,6 +79,7 @@ class BleConnectionForegroundService : Service() {
     }
 
     companion object {
+        private const val TAG = "BleForegroundService"
         private const val CHANNEL_ID = "ble_connection"
         private const val NOTIFICATION_ID = 1
 
@@ -80,10 +89,16 @@ class BleConnectionForegroundService : Service() {
             val intent = Intent(context, BleConnectionForegroundService::class.java).apply {
                 putExtra(EXTRA_DEVICE_NAME, deviceName)
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                // Android 12+ 在后台启动前台服务会抛 ForegroundServiceStartNotAllowedException。
+                // 连接本身仍由进程内 BLE 维持，降级为无前台服务运行，避免崩溃。
+                Log.e(TAG, "startForegroundService rejected; continuing without foreground service", e)
             }
         }
 

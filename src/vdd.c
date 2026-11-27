@@ -35,6 +35,12 @@
 
 #define VDD_GAIN_NUMERATOR   3600   /* 0.6 V 基准 × 6（1/6 增益）= 3.6 V 满量程 */
 #define VDD_RAW_MAX          4096   /* 12 bit */
+/* 2026-11-27 四点万用表校准（App 偏低）：真值 = 0.977866×读数 + 94.98 mV，R²=0.99937。
+ * 整数近似：真值 = 读数×978/1000 + 95 mV。原始点：2701.5/2663、3192.9/3177、
+ * 2718.3/2685、3230.7/3198 mV。 */
+#define VDD_CAL_SCALE_NUM    978U
+#define VDD_CAL_SCALE_DEN    1000U
+#define VDD_CAL_OFFSET_MV    95U
 #define VDD_MV_CEILING       0xFFFEU /* 上限；**不得**等于 VDD_INVALID_MV 以免语义混淆 */
 #define VDD_FAIL_LIMIT       3U     /* 连续失败这么多次才判定"无数据" */
 
@@ -91,6 +97,9 @@ int vdd_sample_mv(uint16_t *mv)
 
 	/* 用 32 位中间量，避免 16 位溢出（raw 最大 4095 → 3599 mV） */
 	mv32 = (uint32_t)raw * VDD_GAIN_NUMERATOR / VDD_RAW_MAX;
+	/* 2026-11-27 校准：把系统性偏低修正到万用表读数（见文件头常量说明）。 */
+	mv32 = (mv32 * VDD_CAL_SCALE_NUM + VDD_CAL_SCALE_DEN / 2U) / VDD_CAL_SCALE_DEN;
+	mv32 += VDD_CAL_OFFSET_MV;
 	if (mv32 > VDD_MV_CEILING) {
 		mv32 = VDD_MV_CEILING;
 	}

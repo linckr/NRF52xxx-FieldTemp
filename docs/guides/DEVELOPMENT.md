@@ -2,7 +2,7 @@
 
 > 本文已移入 `docs/guides/`；除特别说明，命令和源码路径仍以仓库根目录为基准。
 
-> 2026-10-16 开发候选：Firmware 1.0.12 / App 1.1.5 / Room12。候选已完成部分真机验收，BLE RX 栈余量 88 B 仍阻塞发布；截至 2026-10-16 的实测见[验收记录](../20261016-生产OTA与离线校时实测.md)，后续状态统一见[开发入口](../../CODEX_START_HERE.md)。新增相对时间、时间特征 READ 元数据及历史请求 0x05 见[协议补充](../20261016-离线时间机制.md)；其余 UUID、分区和 OTA 报文保持不变。Release 构建现已禁止 Debug 签名回退。
+> 2026-10-16 开发候选：Firmware 1.0.13 / App 1.1.6 / Room12。候选已完成部分真机验收，BLE RX 栈已调至 1280 B（2026-11-26 实测余量 344 B），旧 88 B 阻塞解除；截至 2026-10-16 的实测见[验收记录](../20261016-生产OTA与离线校时实测.md)，后续状态统一见[开发入口](../../CODEX_START_HERE.md)。新增相对时间、时间特征 READ 元数据及历史请求 0x05 见[协议补充](../20261016-离线时间机制.md)；其余 UUID、分区和 OTA 报文保持不变。Release 构建现已禁止 Debug 签名回退。
 
 
 历史验收集中见[2026-10-14 验收摘要](../history/20261014-验收摘要.md)及[原始验收报告](../20261014-startup-voltage-validation.md)。
@@ -40,7 +40,7 @@
 | `sysbuild/mcuboot.conf` | MCUboot 自身的 Kconfig（SPI NOR、布局页 4096、RC 32k、关日志） |
 | `sysbuild/mcuboot.overlay` | MCUboot 的 devicetree（**与 App 独立，改引脚要同步改**） |
 | `pm_static.yml` | Partition Manager 静态布局（**唯一编辑入口**） |
-| `VERSION` | **镜像版本号唯一来源**（当前 `1.0.12` + tweak `0`；正式发布仍为 `1.0.11`，TEST_ONLY+1不发布） |
+| `VERSION` | **镜像版本号唯一来源**（当前 `1.0.13` + tweak `0`；正式发布仍为 `1.0.11`，TEST_ONLY+1不发布） |
 | `tools/build_sysbuild.py` | 构建包装（引号安全 + 签名私钥注入），见 §2 |
 
 ### 关键 Kconfig（摘自实际构建）
@@ -146,7 +146,7 @@ $env:PYTHONPATH = "C:/ncs/v3.2.1/bootloader/mcuboot/scripts"
 C:\ncs\toolchains\66cdf9b75e\opt\bin\python.exe -m imgtool.main verify `
   --key $env:MCU_BOOT_SIGNING_KEY `
   build-v9\PandaTemperature\zephyr\zephyr.signed.bin
-# 当前源码构建期望：Image was correctly validated / Image version: 1.0.12+0（正式发布仍为 1.0.11）
+# 当前源码构建期望：Image was correctly validated / Image version: 1.0.13+0（正式发布仍为 1.0.11）
 ```
 
 ### 2.5 查看构建产物
