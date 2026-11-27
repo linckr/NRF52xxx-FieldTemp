@@ -2,7 +2,7 @@
 
 本统一仓库 `android/` 是唯一日常开发入口。独立Android仓库 `source/` 通过受控同步维护，用于上游PR，不在两处独立修改并无记录地互相覆盖。
 
-最新正式发布 App **1.1.4/code6**，Room11；配套 Firmware **1.0.11+0**。当前源码候选为 **1.1.6/code8、Room12**，配套固件候选 **1.0.13+0**，新固件尚未发布。电压显示统一为3位小数，包括首页、配置、历史列表/详情、设备管理、电池指示和日志；原始毫伏记录、ADC精度及协议未改。历史按设备能力协商V3电压；App保留模块缓存并按正常增量同步，手机有/无GPS来源独立保护。
+最新正式发布 App **1.1.6/code8**，Room12；配套 Firmware **1.0.13+0**。上一正式版本为 App 1.1.4/code6、Firmware 1.0.11+0。电压显示统一为3位小数，包括首页、配置、历史列表/详情、设备管理、电池指示和日志；原始毫伏记录、ADC精度及协议未改。历史按设备能力协商V3电压；App保留模块缓存并按正常增量同步，手机有/无GPS来源独立保护。
 
 构建使用JDK17、Android SDK36和Gradle Wrapper8.13。Debug执行 `gradlew.bat :app:assembleDebug`；生产Release设置仓库外 `PANDA_RELEASE_KEYSTORE_PROPERTIES` 后执行 `:app:assembleRelease :app:lintRelease`。OTA配置参考 `ota.properties.example`，私钥、keystore、配置口令及私人档案不提交。当前Release配置缺失会明确失败，Android Debug证书也被拒绝；无生产配置仍可构建Debug。正式分发必须验证生产证书。
 

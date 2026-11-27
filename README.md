@@ -4,20 +4,20 @@
 
 本仓库统一维护固件、Android App 和硬件设计资料。
 
-> 开发候选为 Firmware 1.0.13 / App 1.1.6（Room12），候选已完成部分真机验收；BLE RX 栈已由 1024 B 调至 1280 B，2026-11-26 实测峰值 936 B、余量 344 B，栈专项通过（旧 88 B 阻塞解除）；下列下载与既有实证仍对应正式 v1.0.11。时间机制见[方案与边界](docs/20261016-离线时间机制.md)。
+> 当前版本为 **Firmware 1.0.13 / App 1.1.6（Room12）**，已完成部分真机验收；BLE RX 栈已由 1024 B 调至 1280 B，2026-11-26 实测峰值 936 B、余量 344 B，栈专项通过（旧 88 B 阻塞解除）。时间机制见[方案与边界](docs/20261016-离线时间机制.md)。
 
 ## 下载与当前版本
 
-[下载正式版 v1.0.11](https://github.com/linckr/NRF52xxx-FieldTemp/releases/tag/v1.0.11)
+[下载正式版 v1.0.13](https://github.com/linckr/NRF52xxx-FieldTemp/releases/tag/v1.0.13)
 
 | 组件 | 当前版本 |
 |---|---|
-| Firmware | 1.0.11+0 |
-| Android App | 1.1.4，versionCode 6 |
+| Firmware | 1.0.13+0 |
+| Android App | 1.1.6，versionCode 8 |
 
 | 你想做什么 | 使用文件 | 方法 |
 |---|---|---|
-| 安装 Android App | `PandaTemperature-1.1.4-release.apk` | 手机安装 |
+| 安装 Android App | `PandaTemperature-1.1.6-release.apk` | 手机安装 |
 | 已有兼容 MCUboot 的设备升级 | `zephyr.signed.bin` | Android App 的 OTA 功能 |
 | 新硬件初次部署或 SWD 恢复 | `factory-merged.hex` | DAPLink / SWD，操作见开发文档 |
 | 检查下载完整性 | `SHA256SUMS` | SHA-256 校验 |

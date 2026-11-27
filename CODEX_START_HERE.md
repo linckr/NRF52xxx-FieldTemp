@@ -14,8 +14,8 @@
 
 - 本地主仓库：`D:\下载\PandaTemperature`；Android Gradle根：`android/`。
 - 原C盘仓库仅作迁移前备用；独立Android仓库仅用于上游同步。不要在两处独立开发。
-- 当前开发候选源码与测试设备：Firmware **1.0.13+0**（`VERSION`）、Android **1.1.6/code8**、Room12。正式发布仍为 **1.0.11**；候选只完成部分真机验收。main的实际HEAD请运行`git log -1`核对。
-- 已发布与验收：[v1.0.11](https://github.com/linckr/NRF52xxx-FieldTemp/releases/tag/v1.0.11)、[最终验收](docs/20261014-startup-voltage-validation.md)。该版本以SWD及独立电池冷启动验证，实际生产OTA搬运/回读实证来自1.0.10，不能混称本版本已重新做OTA。
+- 当前版本：Firmware **1.0.13+0**（`VERSION`）、Android **1.1.6/code8**、Room12；已发布 [v1.0.13](https://github.com/linckr/NRF52xxx-FieldTemp/releases/tag/v1.0.13)。main的实际HEAD请运行`git log -1`核对。
+- 上一正式版本：[v1.0.11](https://github.com/linckr/NRF52xxx-FieldTemp/releases/tag/v1.0.11)、[最终验收](docs/20261014-startup-voltage-validation.md)。1.0.11的SWD/冷启动与OTA搬运实证来自历史批次，不混称1.0.13已重做OTA。
 - 候选 App Flash **152508 B**，RAM **23016/24576 B**（静态余1560 B），MCUboot **31876/32768 B**（余892 B）；新增功能前先评估空间。静态余量不等于运行时栈安全。
 - 候选签名镜像153171 B；MCUboot/primary/secondary/NVS/history地址、UUID和记录布局保持现行代码定义。
 
@@ -57,7 +57,7 @@
 
 构建说明及可复制命令见[DEVELOPMENT](docs/guides/DEVELOPMENT.md)。迁移后使用D盘新的构建目录重新配置，不复用C盘CMake/Gradle缓存。生产签名配置必须在仓库外提供，正式分发核对证书。
 
-`tools/release-baseline.json`记录最新正式版本1.0.11；发布门禁要求候选严格高于它，同版本重验被R3拒绝是预期。不要退回旧基线来让新发布过关。容量/分区检查可独立使用size_summary。
+`tools/release-baseline.json`记录最新正式版本1.0.13；发布门禁要求候选严格高于它，同版本重验被R3拒绝是预期。不要退回旧基线来让新发布过关。容量/分区检查可独立使用size_summary。
 
 ## 下一步
 
