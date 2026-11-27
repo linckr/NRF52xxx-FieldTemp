@@ -135,9 +135,9 @@ interface TemperatureRecordDao {
     suspend fun getHistoryRecordCount(deviceId: String): Int
     
     /**
-     * 查询最新的N条记录（按时间戳倒序）
+     * 查询最新的N条记录（按时间戳倒序；时间未确定的记录不在首页/历史列表显示）
      */
-    @Query("SELECT * FROM temperature_records WHERE deviceId = :deviceId AND timestamp > 0 ORDER BY timeUncertain DESC, timestamp DESC LIMIT :limit")
+    @Query("SELECT * FROM temperature_records WHERE deviceId = :deviceId AND timestamp > 0 AND timeUncertain = 0 ORDER BY timestamp DESC LIMIT :limit")
     suspend fun getLatestRecords(deviceId: String, limit: Int): List<TemperatureRecord>
     
     /**
@@ -153,15 +153,15 @@ interface TemperatureRecordDao {
     suspend fun getLatestRecordWithoutGps(deviceId: String): TemperatureRecord?
     
     /**
-     * 分页查询记录（按时间戳倒序）
+     * 分页查询记录（按时间戳倒序；时间未确定的记录不展示）
      */
-    @Query("SELECT * FROM temperature_records WHERE deviceId = :deviceId AND timestamp > 0 ORDER BY timeUncertain DESC, timestamp DESC LIMIT :limit OFFSET :offset")
+    @Query("SELECT * FROM temperature_records WHERE deviceId = :deviceId AND timestamp > 0 AND timeUncertain = 0 ORDER BY timestamp DESC LIMIT :limit OFFSET :offset")
     suspend fun getRecordsWithOffset(deviceId: String, limit: Int, offset: Int): List<TemperatureRecord>
     
     /**
-     * 分页查询记录（带时间筛选，按时间戳倒序）
+     * 分页查询记录（带时间筛选，按时间戳倒序；时间未确定的记录不展示）
      */
-    @Query("SELECT * FROM temperature_records WHERE deviceId = :deviceId AND timestamp >= :startTime AND timestamp <= :endTime ORDER BY timestamp DESC LIMIT :limit OFFSET :offset")
+    @Query("SELECT * FROM temperature_records WHERE deviceId = :deviceId AND timestamp >= :startTime AND timestamp <= :endTime AND timeUncertain = 0 ORDER BY timestamp DESC LIMIT :limit OFFSET :offset")
     suspend fun getRecordsWithOffsetAndTimeRange(deviceId: String, startTime: Long, endTime: Long, limit: Int, offset: Int): List<TemperatureRecord>
     
     /**
@@ -171,8 +171,8 @@ interface TemperatureRecordDao {
     suspend fun getRecordCountByTimeRange(deviceId: String, startTime: Long, endTime: Long): Int
     
     /**
-     * 查询最新的N条记录（Flow版本，用于首页显示）
+     * 查询最新的N条记录（Flow版本，用于首页显示；时间未确定的记录不展示）
      */
-    @Query("SELECT * FROM temperature_records WHERE deviceId = :deviceId AND timestamp > 0 ORDER BY timeUncertain DESC, timestamp DESC LIMIT :limit")
+    @Query("SELECT * FROM temperature_records WHERE deviceId = :deviceId AND timestamp > 0 AND timeUncertain = 0 ORDER BY timestamp DESC LIMIT :limit")
     fun getLatestRecordsFlow(deviceId: String, limit: Int): Flow<List<TemperatureRecord>>
 }
