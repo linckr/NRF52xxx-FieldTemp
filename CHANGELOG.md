@@ -6,6 +6,7 @@
 
 - **ADC 电压校准**：用万用表 4 点对照拟合 `真值 = App×978/1000 + 95 mV`，写入 `src/vdd.c`；SWD 烧录后复测 2.7006 V→2.693 V、3.1877 V→3.185 V（误差 −7.6 / −2.7 mV）。
 - **BLE RX 栈**：1024 B → 1280 B；小米真机 OTA 负载后峰值 936 B、余量 344 B，全部判定栈余量 ≥128 B，解除旧 88 B 发布阻塞。
+- **生产签名镜像**：Firmware 1.0.13+0 使用生产固件密钥签名，`imgtool verify` 通过；`zephyr.signed.bin` SHA-256 `75fb159030d5206fbded5cebe524240ccaedc30224ce7c54523fb42a28532ffa`。
 
 ### Android
 
